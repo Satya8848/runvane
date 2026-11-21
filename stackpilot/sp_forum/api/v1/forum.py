@@ -202,3 +202,115 @@ def similar(title):
 	if len((title or "").strip()) < 8:
 		return []
 	return [hit for hit in search_engine.search(title[:200], limit=8)["hits"] if hit["kind"] in ("question", "playbook")][:6]
+
+
+@frappe.whitelist(methods=["POST"])
+@rate_limit(limit=30, seconds=60 * 10)
+def edit_question(name, title=None, body=None, tags=None, role_track=None):
+	"""
+	Edit your question (or any, as a moderator).
+
+	**Endpoint:** `/api/method/stackpilot.sp_forum.api.v1.forum.edit_question`
+	**HTTP Method:** POST
+	**Parameters:**
+		- name (str, required): Question.
+		- title, body, tags, role_track (str, optional): New values.
+	**Response:**
+	```json
+	{"message": {"ok": true}}
+	```
+	"""
+	forum.edit_question(name, title, body, tags, role_track)
+	return {"ok": True}
+
+
+@frappe.whitelist(methods=["POST"])
+def set_status(name, status):
+	"""
+	Close or reopen your question.
+
+	**Endpoint:** `/api/method/stackpilot.sp_forum.api.v1.forum.set_status`
+	**HTTP Method:** POST
+	**Parameters:**
+		- name (str, required): Question.
+		- status (str, required): Open or Closed.
+	**Response:**
+	```json
+	{"message": {"status": "Closed"}}
+	```
+	"""
+	return {"status": forum.set_question_status(name, status)}
+
+
+@frappe.whitelist(methods=["POST"])
+def delete_question(name):
+	"""
+	Delete your question while no one else has answered (moderators: always).
+
+	**Endpoint:** `/api/method/stackpilot.sp_forum.api.v1.forum.delete_question`
+	**HTTP Method:** POST
+	**Parameters:**
+		- name (str, required): Question.
+	**Response:**
+	```json
+	{"message": {"ok": true}}
+	```
+	"""
+	forum.delete_question(name)
+	return {"ok": True}
+
+
+@frappe.whitelist(methods=["POST"])
+@rate_limit(limit=30, seconds=60 * 10)
+def edit_answer(name, body):
+	"""
+	Edit your answer.
+
+	**Endpoint:** `/api/method/stackpilot.sp_forum.api.v1.forum.edit_answer`
+	**HTTP Method:** POST
+	**Parameters:**
+		- name (str, required): Answer.
+		- body (str, required): New Markdown.
+	**Response:**
+	```json
+	{"message": {"ok": true}}
+	```
+	"""
+	forum.edit_answer(name, body)
+	return {"ok": True}
+
+
+@frappe.whitelist(methods=["POST"])
+def delete_answer(name):
+	"""
+	Delete your answer.
+
+	**Endpoint:** `/api/method/stackpilot.sp_forum.api.v1.forum.delete_answer`
+	**HTTP Method:** POST
+	**Parameters:**
+		- name (str, required): Answer.
+	**Response:**
+	```json
+	{"message": {"ok": true}}
+	```
+	"""
+	forum.delete_answer(name)
+	return {"ok": True}
+
+
+@frappe.whitelist(methods=["POST"])
+def delete_comment(name):
+	"""
+	Delete your comment.
+
+	**Endpoint:** `/api/method/stackpilot.sp_forum.api.v1.forum.delete_comment`
+	**HTTP Method:** POST
+	**Parameters:**
+		- name (str, required): SP Comment.
+	**Response:**
+	```json
+	{"message": {"ok": true}}
+	```
+	"""
+	forum.delete_comment(name)
+	return {"ok": True}

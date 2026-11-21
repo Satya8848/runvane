@@ -138,3 +138,41 @@ class TestQualityAndVisitors(IntegrationTestCase):
 		settings.update({"anthropic_api_key": "", "guest_daily_requests": 5, "month_spend_usd": 0})
 		settings.save()
 		frappe.clear_document_cache("AI Settings", "AI Settings")
+
+
+class TestAuthorControls(IntegrationTestCase):
+	"""Authors manage their own posts; others cannot."""
+
+	def setUp(self):
+		"""Two members."""
+		for email in ("sp-author@example.com", "sp-other@example.com"):
+			if not frappe.db.exists("User", email):
+				frappe.get_doc({"doctype": "User", "email": email, "first_name": email.split("@")[0], "user_type": "Website User", "send_welcome_email": 0}).insert(ignore_permissions=True)
+
+	def tearDown(self):
+		"""Back to Administrator."""
+		frappe.set_user("Administrator")
+
+	def test_edit_close_delete_rules(self):
+		"""Only the author edits; no delete after others answered; close and answer deletion work."""
+		frappe.set_user("sp-author@example.com")
+		q = forum.ask("Nginx returns 504 behind the load balancer", "Requests over 60 seconds time out with 504 at the edge proxy.")
+		forum.edit_question(q, title="Nginx returns 504 Gateway Timeout behind the ALB")
+		self.assertIn("Gateway Timeout", frappe.db.get_value("Question", q, "title"))
+		frappe.set_user("sp-other@example.com")
+		with self.assertRaises(frappe.PermissionError):
+			forum.edit_question(q, title="Someone else rewrites this question title")
+		a = forum.answer(q, "Raise proxy_read_timeout and the ALB idle timeout above the slowest request.")
+		forum.edit_answer(a, "Raise proxy_read_timeout and the ALB idle timeout, and make slow work async.")
+		frappe.set_user("sp-author@example.com")
+		with self.assertRaises(frappe.PermissionError):
+			forum.edit_answer(a, "The author tries to rewrite someone else's answer here.")
+		with self.assertRaises(frappe.ValidationError):
+			forum.delete_question(q)
+		self.assertEqual(forum.set_question_status(q, "Closed"), "Closed")
+		frappe.set_user("sp-other@example.com")
+		forum.delete_answer(a)
+		self.assertEqual(frappe.db.get_value("Question", q, "answer_count"), 0)
+		frappe.set_user("sp-author@example.com")
+		forum.delete_question(q)
+		self.assertFalse(frappe.db.exists("Question", q))

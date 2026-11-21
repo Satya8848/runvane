@@ -83,7 +83,9 @@ const kinds = [
 	{ value: "dockerfile", label: "Dockerfile", hint: "Paste your Dockerfile…" },
 	{ value: "pipeline", label: "CI/CD pipeline", hint: "Paste azure-pipelines.yml, Jenkinsfile or GitHub Actions workflow…" },
 ];
-const mode = ref("chat");
+let startMode = "chat";
+try { startMode = sessionStorage.getItem("rv_ai_mode") || "chat"; sessionStorage.removeItem("rv_ai_mode"); } catch (e) { /* storage blocked */ }
+const mode = ref(startMode);
 const status = ref(null);
 const convos = ref([]);
 const messages = ref([]);

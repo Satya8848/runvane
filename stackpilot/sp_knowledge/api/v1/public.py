@@ -209,13 +209,13 @@ def session():
 	**Parameters:** none
 	**Response:**
 	```json
-	{"message": {"user": "Guest", "logged_in": false, "display_name": null, "reputation": 0, "is_moderator": false}}
+	{"message": {"user": "Guest", "logged_in": false, "display_name": null, "reputation": 0, "is_moderator": false, "is_admin": false}}
 	```
 	"""
 	user = frappe.session.user
 	if user == "Guest":
-		return {"user": "Guest", "logged_in": False, "display_name": None, "reputation": 0, "is_moderator": False}
+		return {"user": "Guest", "logged_in": False, "display_name": None, "reputation": 0, "is_moderator": False, "is_admin": False}
 	profile = frappe.db.get_value("SP Profile", user, ["display_name", "reputation"], as_dict=True) or {}
 	roles = frappe.get_roles()
 	return {"user": user, "logged_in": True, "display_name": profile.get("display_name") or user.split("@")[0], "reputation": profile.get("reputation") or 0,
-		"is_moderator": bool({"SP Moderator", "System Manager"} & set(roles))}
+		"is_moderator": bool({"SP Moderator", "System Manager"} & set(roles)), "is_admin": "System Manager" in roles}

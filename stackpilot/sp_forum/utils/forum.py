@@ -126,6 +126,168 @@ def accept(answer_name):
 		add_reputation(ans.owner, "answer_accepted", "Answer", answer_name)
 
 
+def is_moderator():
+	"""
+	Whether the session user can manage anyone's posts.
+
+	Returns:
+		bool: True for SP Moderator or System Manager.
+	"""
+	return bool({"SP Moderator", "System Manager"} & set(frappe.get_roles()))
+
+
+def require_owner_or_moderator(doctype, name):
+	"""
+	Load a post and allow only its author or a moderator.
+
+	Parameters:
+		doctype (str, required): Question, Answer or SP Comment.
+		name (str, required): Record name.
+
+	Returns:
+		Document: The post.
+	"""
+	user = require_member()
+	doc = frappe.get_doc(doctype, name)
+	if doc.owner != user and not is_moderator():
+		frappe.throw(_("You can only change your own posts."), frappe.PermissionError)
+	return doc
+
+
+def edit_question(name, title=None, body=None, tags=None, role_track=None):
+	"""
+	Edit a question (author or moderator).
+
+	Parameters:
+		name (str, required): Question.
+		title, body, tags, role_track (str, optional): New values.
+
+	Returns:
+		None
+	"""
+	doc = require_owner_or_moderator("Question", name)
+	if title is not None:
+		title = title.strip()
+		if len(title) < MIN_TITLE or not looks_like_words(title):
+			frappe.throw(_("Write a clear title of at least {0} characters and 3 words.").format(MIN_TITLE))
+		doc.title = title[:140]
+	if body is not None:
+		_check_body(body)
+		doc.body = body
+	if tags is not None:
+		doc.tags = _clean_tags(tags)
+	if role_track is not None:
+		doc.role_track = role_track or None
+	doc.save(ignore_permissions=True)
+
+
+def set_question_status(name, status):
+	"""
+	Close or reopen a question (author or moderator).
+
+	Parameters:
+		name (str, required): Question.
+		status (str, required): Open or Closed.
+
+	Returns:
+		str: New status.
+	"""
+	doc = require_owner_or_moderator("Question", name)
+	if status not in ("Open", "Closed"):
+		frappe.throw(_("Status must be Open or Closed."))
+	new = "Answered" if status == "Open" and doc.accepted_answer else status
+	frappe.db.set_value("Question", name, "status", new, update_modified=False)
+	return new
+
+
+def delete_question(name):
+	"""
+	Delete a question with its answers, comments, votes and reports.
+	Authors can delete only while no one else has answered; moderators always.
+
+	Parameters:
+		name (str, required): Question.
+
+	Returns:
+		None
+	"""
+	doc = require_owner_or_moderator("Question", name)
+	others = frappe.db.count("Answer", {"question": name, "is_ai": 0, "owner": ["!=", doc.owner]})
+	if others and not is_moderator():
+		frappe.throw(_("Others have answered this question, so it can't be deleted. Close it instead."))
+	answers = frappe.get_all("Answer", filters={"question": name}, pluck="name", ignore_permissions=True)
+	for ref in [name, *answers]:
+		for doctype in ("Vote", "SP Comment", "Report", "Bookmark"):
+			frappe.db.delete(doctype, {"reference_name": ref})
+	frappe.db.delete("Answer", {"question": name})
+	frappe.delete_doc("Question", name, ignore_permissions=True)
+
+
+def edit_answer(name, body):
+	"""
+	Edit an answer (author or moderator).
+
+	Parameters:
+		name (str, required): Answer.
+		body (str, required): New Markdown.
+
+	Returns:
+		None
+	"""
+	doc = require_owner_or_moderator("Answer", name)
+	_check_body(body)
+	doc.body = body
+	doc.save(ignore_permissions=True)
+
+
+def delete_answer(name):
+	"""
+	Delete an answer (author or moderator); clears the accepted mark if needed.
+
+	Parameters:
+		name (str, required): Answer.
+
+	Returns:
+		None
+	"""
+	doc = require_owner_or_moderator("Answer", name)
+	question = doc.question
+	for doctype in ("Vote", "SP Comment", "Report"):
+		frappe.db.delete(doctype, {"reference_name": name})
+	frappe.delete_doc("Answer", name, ignore_permissions=True)
+	values = {"answer_count": frappe.db.count("Answer", {"question": question})}
+	if frappe.db.get_value("Question", question, "accepted_answer") == name:
+		values.update({"accepted_answer": None, "status": "Open"})
+	frappe.db.set_value("Question", question, values, update_modified=False)
+
+
+def delete_comment(name):
+	"""
+	Delete a comment (author or moderator).
+
+	Parameters:
+		name (str, required): SP Comment.
+
+	Returns:
+		None
+	"""
+	require_owner_or_moderator("SP Comment", name)
+	frappe.delete_doc("SP Comment", name, ignore_permissions=True)
+
+
+def _edited(row):
+	"""
+	Whether a post was edited after it was created (more than a minute later).
+
+	Parameters:
+		row (dict | Document, required): Post with creation and modified.
+
+	Returns:
+		bool: Edited.
+	"""
+	return bool(row.get("modified") and row.get("creation") and (row["modified"] - row["creation"]).total_seconds() > 60)
+
+
 def question_detail(name):
 	"""
 	A question with rendered body, answers (accepted first, then votes) and comments.
@@ -138,7 +300,7 @@ def question_detail(name):
 	"""
 	q = frappe.get_doc("Question", name)
 	frappe.db.set_value("Question", name, "views", (q.views or 0) + 1, update_modified=False)
-	answers = frappe.get_all("Answer", filters={"question": name}, fields=["name", "owner", "body", "votes", "is_accepted", "is_ai", "ai_provider", "creation"],
+	answers = frappe.get_all("Answer", filters={"question": name}, fields=["name", "owner", "body", "votes", "is_accepted", "is_ai", "ai_provider", "creation", "modified"],
 		order_by="is_accepted desc, votes desc, creation asc", ignore_permissions=True)
 	names = {name: "Question", **{a.name: "Answer" for a in answers}}
 	comments = frappe.get_all("SP Comment", filters={"reference_name": ["in", list(names)]}, fields=["name", "owner", "reference_name", "body", "creation"], order_by="creation asc", ignore_permissions=True)
@@ -146,16 +308,24 @@ def question_detail(name):
 	my_votes = {}
 	if frappe.session.user != "Guest":
 		my_votes = dict(frappe.get_all("Vote", filters={"user": frappe.session.user, "reference_name": ["in", list(names)]}, fields=["reference_name", "value"], as_list=True))
+	me, mod = frappe.session.user, is_moderator()
 	for a in answers:
-		a["html"] = render(a.pop("body"))
+		a["markdown"] = a.pop("body")
+		a["html"] = render(a["markdown"])
 		a["author"] = authors.get(a.owner)
+		a["can_edit"] = (a.owner == me and not a.is_ai) or mod
+		a["edited"] = _edited(a)
 	for c in comments:
 		c["html"] = render(c.pop("body"))
 		c["author"] = authors.get(c.owner)
+		c["can_delete"] = c.owner == me or mod
 	return {
 		"question": {"name": q.name, "title": q.title, "html": render(q.body), "role_track": q.role_track, "status": q.status, "votes": q.votes, "views": (q.views or 0) + 1,
-			"tags": [t for t in (q.tags or "").split(",") if t], "creation": q.creation, "owner": q.owner, "author": authors.get(q.owner), "ai_draft_status": q.ai_draft_status},
+			"tags": [t for t in (q.tags or "").split(",") if t], "creation": q.creation, "owner": q.owner, "author": authors.get(q.owner), "ai_draft_status": q.ai_draft_status,
+			"markdown": q.body, "edited": _edited(q.as_dict())},
 		"answers": answers, "comments": comments, "my_votes": my_votes, "is_owner": frappe.session.user == q.owner,
+		"can_manage": frappe.session.user == q.owner or is_moderator(),
+		"others_answered": any(a.owner != q.owner and not a.is_ai for a in answers),
 	}
 
 

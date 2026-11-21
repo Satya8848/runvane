@@ -77,3 +77,35 @@ def update_profile(display_name=None, headline=None, role_track=None, bio=None, 
 		values.pop("role_track")
 	frappe.db.set_value("SP Profile", user, values)
 	return {"ok": True}
+
+
+@frappe.whitelist(methods=["GET"])
+def me():
+	"""
+	The signed-in member's profile, badges and own activity, for the My account page.
+
+	**Endpoint:** `/api/method/stackpilot.sp_core.api.v1.account.me`
+	**HTTP Method:** GET
+	**Parameters:** none
+	**Response:**
+	```json
+	{"message": {"profile": {"display_name": "...", "reputation": 25, ...}, "email": "...", "badges": [], "counts": {"questions": 2, "answers": 5, "boards": 1, "accepted": 1},
+	             "questions": [...], "answers": [...], "boards": [...]}}
+	```
+	"""
+	user = frappe.session.user
+	if user == "Guest":
+		raise frappe.PermissionError
+	ensure_profile(user)
+	profile = frappe.db.get_value("SP Profile", user, ["display_name", "headline", "role_track", "reputation", "location", "github", "website", "bio"], as_dict=True)
+	questions = frappe.get_all("Question", filters={"owner": user}, fields=["name", "title", "status", "votes", "answer_count", "creation"], order_by="creation desc", limit=50, ignore_permissions=True)
+	answers = frappe.get_all("Answer", filters={"owner": user, "is_ai": 0}, fields=["name", "question", "votes", "is_accepted", "creation"], order_by="creation desc", limit=50, ignore_permissions=True)
+	titles = dict(frappe.get_all("Question", filters={"name": ["in", [a.question for a in answers]]}, fields=["name", "title"], as_list=True, ignore_permissions=True)) if answers else {}
+	for answer in answers:
+		answer["question_title"] = titles.get(answer.question)
+	boards = frappe.get_all("Architecture Diagram", filters={"owner": user}, fields=["name", "title", "visibility", "votes", "modified"], order_by="modified desc", limit=50, ignore_permissions=True)
+	badges = frappe.get_all("User Badge", filters={"user": user}, pluck="badge", ignore_permissions=True)
+	return {
+		"email": user, "profile": profile, "badges": badges, "questions": questions, "answers": answers, "boards": boards,
+		"counts": {"questions": len(questions), "answers": len(answers), "boards": len(boards), "accepted": sum(1 for a in answers if a.is_accepted)},
+	}

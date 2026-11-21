@@ -22,6 +22,7 @@ const routes = [
 	{ path: "/board", component: page("Board"), meta: { title: "Architecture board" } },
 	{ path: "/board/:name", component: page("Board"), meta: { title: "Architecture board" } },
 	{ path: "/join", component: page("Join"), meta: { title: "Join" } },
+	{ path: "/me", component: page("Me"), meta: { title: "My account" } },
 	{ path: "/:rest(.*)*", component: page("NotFound"), meta: { title: "Not found" } },
 ];
 const router = createRouter({ history: createWebHistory(), routes, scrollBehavior: (to, from, saved) => saved || (to.hash ? { el: to.hash } : { top: 0 }) });

@@ -14,7 +14,7 @@ website_route_rules = [
 	for prefix in ("t", "playbooks", "guides", "q", "ask", "ai", "board", "tools", "glossary", "interview", "search", "u", "learn")
 ] + [
 	{"from_route": f"/{prefix}", "to_route": "spa"}
-	for prefix in ("playbooks", "guides", "q", "ask", "ai", "board", "tools", "glossary", "interview", "search", "learn", "join")
+	for prefix in ("playbooks", "guides", "q", "ask", "ai", "board", "tools", "glossary", "interview", "search", "learn", "join", "me")
 ]
 
 scheduler_events = {"monthly": ["stackpilot.sp_ai.tasks.reset_monthly_spend"]}

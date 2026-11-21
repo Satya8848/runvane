@@ -14,7 +14,7 @@
 			</button>
 			<template v-if="session.loaded">
 				<div v-if="!session.logged_in" class="flex items-center gap-2"><a class="hidden text-sm text-ink-600 hover:text-ink-900 dark:text-ink-300 sm:inline" href="/login?redirect-to=/">Sign in</a><router-link class="btn btn-primary" to="/join">Join free</router-link></div>
-				<div v-else class="flex items-center gap-2 text-sm"><span class="hidden font-medium sm:inline">{{ session.display_name }}</span><span class="chip" title="Reputation">★ {{ session.reputation }}</span><a class="text-ink-400 hover:text-ink-700" href="/?cmd=web_logout" @click.prevent="logout">Sign out</a></div>
+				<UserMenu v-else />
 			</template>
 		</div>
 		<nav class="flex gap-1 overflow-x-auto px-4 pb-2 text-sm [scrollbar-width:none] md:hidden" aria-label="Sections">
@@ -31,6 +31,7 @@
 import { onMounted, onUnmounted, ref } from "vue";
 import { loadSession, session, toast } from "./api.js";
 import SearchPalette from "./components/SearchPalette.vue";
+import UserMenu from "./components/UserMenu.vue";
 
 const nav = [
 	{ to: "/playbooks", label: "Playbooks" }, { to: "/q", label: "Forum" }, { to: "/ai", label: "AI assistant" },
@@ -50,16 +51,6 @@ function onKey(event) {
 		event.preventDefault();
 		palette.value = true;
 	}
-}
-
-/**
- * Sign out and reload.
- *
- * @returns {Promise<void>}
- */
-async function logout() {
-	await fetch("/api/method/logout", { method: "POST", headers: { "X-Frappe-CSRF-Token": window.csrf_token || "" } });
-	location.href = "/";
 }
 
 onMounted(() => { loadSession(); addEventListener("keydown", onKey); });
