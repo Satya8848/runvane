@@ -129,9 +129,23 @@ def _seed_playbooks():
 
 
 def _seed_guides():
-	"""Insert configuration guides and interview items. Returns: int."""
+	"""
+	Insert configuration guides and interview items, and refresh seeded guides
+	whose shipped text changed. A guide last edited by someone other than
+	Administrator is left alone, so editors' changes are never overwritten.
+
+	Returns:
+		int: Inserted or refreshed count.
+	"""
 	data = _load("guides.json")
 	count = _insert_missing("Config Guide", "slug", data["guides"])
+	for row in data["guides"]:
+		current = frappe.db.get_value("Config Guide", row["slug"], ["modified_by", "body", "intro"], as_dict=True)
+		if current and current.modified_by == "Administrator" and (current.body != row["body"] or current.intro != row["intro"]):
+			doc = frappe.get_doc("Config Guide", row["slug"])
+			doc.update({k: row[k] for k in ("title", "category", "intro", "body", "diagram")})
+			doc.save(ignore_permissions=True)
+			count += 1
 	return count + _insert_missing("Interview Item", "question", data["interview"])
 
 
