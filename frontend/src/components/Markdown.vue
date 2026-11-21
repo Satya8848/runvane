@@ -33,19 +33,25 @@ async function enhance() {
 			continue;
 		}
 		hljs.highlightElement(code);
+		const lang = ([...code.classList].find((c) => c.startsWith("language-")) || "").replace("language-", "") || code.result?.language || "code";
 		const wrap = document.createElement("div");
-		wrap.className = "codewrap";
+		wrap.className = "codewrap not-prose";
 		pre.parentNode.insertBefore(wrap, pre);
-		wrap.appendChild(pre);
+		const bar = document.createElement("div");
+		bar.className = "codebar";
+		const label = document.createElement("span");
+		label.textContent = lang;
 		const button = document.createElement("button");
 		button.className = "copy";
 		button.type = "button";
 		button.textContent = "Copy";
+		button.setAttribute("aria-label", "Copy code");
 		button.onclick = async () => {
-			try { await navigator.clipboard.writeText(code.innerText); button.textContent = "Copied"; } catch (e) { button.textContent = "Select & copy"; }
+			try { await navigator.clipboard.writeText(code.innerText); button.textContent = "Copied ✓"; } catch (e) { const r = document.createRange(); r.selectNodeContents(code); getSelection().removeAllRanges(); getSelection().addRange(r); button.textContent = "Selected"; }
 			setTimeout(() => (button.textContent = "Copy"), 1500);
 		};
-		wrap.appendChild(button);
+		bar.append(label, button);
+		wrap.append(bar, pre);
 	}
 }
 onMounted(enhance);

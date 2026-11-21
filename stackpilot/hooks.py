@@ -1,5 +1,5 @@
 app_name = "stackpilot"
-app_title = "StackPilot"
+app_title = "Runvane"
 app_publisher = "Satya"
 app_description = "Problem-solving platform for DevOps, DevSecOps, architects, programmers, Linux admins and DBAs: playbooks, forum, AI analysis, architecture board and builders"
 app_email = "satya8848@users.noreply.github.com"
@@ -40,7 +40,7 @@ doc_events = {
 # 	{
 # 		"name": "stackpilot",
 # 		"logo": "/assets/stackpilot/logo.png",
-# 		"title": "StackPilot",
+# 		"title": "Runvane",
 # 		"route": "/stackpilot",
 # 		"has_permission": "stackpilot.api.permission.has_app_permission"
 # 	}

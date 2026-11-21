@@ -42,8 +42,8 @@ def ask(title, body, role_track=None, tags=None):
 	"""
 	require_member()
 	title = (title or "").strip()
-	if len(title) < MIN_TITLE:
-		frappe.throw(_("Write a title of at least {0} characters that says what is wrong.").format(MIN_TITLE))
+	if len(title) < MIN_TITLE or not looks_like_words(title):
+		frappe.throw(_("Write a clear title of at least {0} characters and 3 words that says what is wrong.").format(MIN_TITLE))
 	_check_body(body)
 	doc = frappe.get_doc({"doctype": "Question", "title": title[:140], "body": body, "role_track": role_track or None,
 		"tags": _clean_tags(tags), "status": "Open"}).insert(ignore_permissions=True)
@@ -157,6 +157,22 @@ def question_detail(name):
 			"tags": [t for t in (q.tags or "").split(",") if t], "creation": q.creation, "owner": q.owner, "author": authors.get(q.owner), "ai_draft_status": q.ai_draft_status},
 		"answers": answers, "comments": comments, "my_votes": my_votes, "is_owner": frappe.session.user == q.owner,
 	}
+
+
+def looks_like_words(text):
+	"""
+	Reject keyboard-mash titles: needs 3+ words and a normal share of vowels.
+
+	Parameters:
+		text (str, required): Title.
+
+	Returns:
+		bool: True when it reads like a sentence.
+	"""
+	words = [w for w in text.split() if any(c.isalpha() for c in w)]
+	letters = [c for c in text.lower() if c.isalpha()]
+	vowels = sum(c in "aeiouy" for c in letters)
+	return len(words) >= 3 and bool(letters) and 0.2 <= vowels / len(letters) <= 0.7
 
 
 def _authors(users):

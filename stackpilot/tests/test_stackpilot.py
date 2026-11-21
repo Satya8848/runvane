@@ -110,3 +110,31 @@ class TestAIGateway(IntegrationTestCase):
 		settings.update({"byok_only": 0, "monthly_budget_usd": 25, "month_spend_usd": 0, "anthropic_api_key": ""})
 		settings.save()
 		frappe.clear_document_cache("AI Settings", "AI Settings")
+
+
+class TestQualityAndVisitors(IntegrationTestCase):
+	"""Junk titles are refused; visitors get a small daily AI allowance."""
+
+	def test_keyboard_mash_rejected(self):
+		"""Mash and one-word titles fail; real titles pass."""
+		self.assertFalse(forum.looks_like_words("sddsfsdfdssddcsd"))
+		self.assertFalse(forum.looks_like_words("help help"))
+		self.assertTrue(forum.looks_like_words("Pods stuck Pending on EKS after scale up"))
+
+	def test_visitor_allowance(self):
+		"""A visitor is refused after the daily per-IP allowance."""
+		settings = frappe.get_single("AI Settings")
+		settings.update({"ai_enabled": 1, "anthropic_api_key": "sk-ant-test-key-000000000000", "guest_daily_requests": 2, "byok_only": 0, "monthly_budget_usd": 25})
+		settings.save()
+		frappe.clear_document_cache("AI Settings", "AI Settings")
+		frappe.local.request_ip = "203.0.113.9"
+		fake = {"text": "ok", "tokens_in": 10, "tokens_out": 10}
+		with patch("stackpilot.sp_ai.utils.providers.complete", return_value=fake):
+			gateway.run("chat", "s", [{"role": "user", "content": "q"}], user="Guest")
+			gateway.run("chat", "s", [{"role": "user", "content": "q"}], user="Guest")
+			with self.assertRaises(gateway.AIUnavailable):
+				gateway.run("chat", "s", [{"role": "user", "content": "q"}], user="Guest")
+		settings = frappe.get_single("AI Settings")
+		settings.update({"anthropic_api_key": "", "guest_daily_requests": 5, "month_spend_usd": 0})
+		settings.save()
+		frappe.clear_document_cache("AI Settings", "AI Settings")

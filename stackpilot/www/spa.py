@@ -7,7 +7,7 @@ description per URL so links and search engines show the right content."""
 import frappe
 
 no_cache = 1
-SITE = "StackPilot"
+SITE = "Runvane"
 DEFAULT_DESCRIPTION = ("Real-world playbooks, AI log and config analysis, a community forum and an architecture board "
 	"for DevOps, DevSecOps, solution architects, programmers, Linux admins, DBAs and cloud engineers.")
 

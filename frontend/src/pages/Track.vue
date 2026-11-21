@@ -31,5 +31,5 @@ import SeverityDot from "../components/SeverityDot.vue";
 
 const route = useRoute();
 const data = ref(null);
-watch(() => route.params.slug, async (slug) => { if (slug) { data.value = await call(`${KB}.track`, { slug }); document.title = `${data.value.track.title} · StackPilot`; } }, { immediate: true });
+watch(() => route.params.slug, async (slug) => { if (slug) { data.value = await call(`${KB}.track`, { slug }); document.title = `${data.value.track.title} · Runvane`; } }, { immediate: true });
 </script>

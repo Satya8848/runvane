@@ -28,6 +28,7 @@
   "builder_provider",
   "s3",
   "daily_token_quota",
+  "guest_daily_requests",
   "monthly_budget_usd",
   "month_spend_usd",
   "c3",
@@ -143,6 +144,13 @@
    "label": "Daily Token Quota",
    "default": "60000",
    "description": "Per member per day, site keys only."
+  },
+  {
+   "fieldname": "guest_daily_requests",
+   "fieldtype": "Int",
+   "label": "Visitor Requests per Day (per IP)",
+   "default": "5",
+   "description": "AI questions a visitor without an account can ask per day. 0 turns visitor AI off."
   },
   {
    "fieldname": "monthly_budget_usd",

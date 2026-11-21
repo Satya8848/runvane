@@ -10,7 +10,7 @@ from stackpilot.sp_ai.utils import features, gateway
 from stackpilot.sp_forum.utils.forum import require_member
 
 
-@frappe.whitelist(methods=["GET"])
+@frappe.whitelist(allow_guest=True, methods=["GET"])
 def status():
 	"""
 	What AI the member can use now.
@@ -23,10 +23,13 @@ def status():
 	{"message": {"enabled": true, "site_keys": ["claude"], "own_keys": [], "used_today": 1200, "quota": 60000, "budget_reached": false}}
 	```
 	"""
-	return gateway.status(require_member())
+	user = frappe.session.user
+	if user != "Guest":
+		require_member()
+	return gateway.status(user)
 
 
-@frappe.whitelist(methods=["POST"])
+@frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(limit=30, seconds=60 * 10)
 def chat(message, conversation=None, role_track=None):
 	"""
@@ -43,11 +46,12 @@ def chat(message, conversation=None, role_track=None):
 	{"message": {"conversation": "...", "answer": "markdown", "sources": [...], "masked": [], "provider": "claude"}}
 	```
 	"""
-	require_member()
+	if frappe.session.user != "Guest":
+		require_member()
 	return features.chat(message, conversation, role_track)
 
 
-@frappe.whitelist(methods=["POST"])
+@frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(limit=20, seconds=60 * 10)
 def analyse(kind, text, role_track=None, question=None):
 	"""
@@ -65,7 +69,8 @@ def analyse(kind, text, role_track=None, question=None):
 	{"message": {"conversation": "...", "answer": "markdown", "masked": ["AWS access key"], "provider": "claude"}}
 	```
 	"""
-	require_member()
+	if frappe.session.user != "Guest":
+		require_member()
 	return features.analyse(kind, text, role_track, question)
 
 

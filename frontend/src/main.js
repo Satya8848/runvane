@@ -6,7 +6,7 @@ import "./style.css";
 
 const page = (name) => () => import(`./pages/${name}.vue`);
 const routes = [
-	{ path: "/", component: page("Home"), meta: { title: "StackPilot" } },
+	{ path: "/", component: page("Home"), meta: { title: "Runvane" } },
 	{ path: "/search", component: page("Search"), meta: { title: "Search" } },
 	{ path: "/t/:slug", component: page("Track"), meta: { title: "Role" } },
 	{ path: "/playbooks", component: page("Playbooks"), meta: { title: "Playbooks" } },
@@ -25,5 +25,5 @@ const routes = [
 	{ path: "/:rest(.*)*", component: page("NotFound"), meta: { title: "Not found" } },
 ];
 const router = createRouter({ history: createWebHistory(), routes, scrollBehavior: (to, from, saved) => saved || (to.hash ? { el: to.hash } : { top: 0 }) });
-router.afterEach((to) => (document.title = to.meta.title === "StackPilot" ? "StackPilot · Fix it faster" : `${to.meta.title} · StackPilot`));
+router.afterEach((to) => (document.title = to.meta.title === "Runvane" ? "Runvane · Fix it faster" : `${to.meta.title} · Runvane`));
 createApp(App).use(router).mount("#app");

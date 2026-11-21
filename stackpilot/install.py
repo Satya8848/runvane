@@ -67,10 +67,13 @@ def seed():
 	"""
 	create_roles()
 	settings = frappe.get_single("Website Settings")
-	if settings.disable_signup or settings.home_page != "spa":
+	if settings.disable_signup or settings.home_page != "spa" or settings.app_name != "Runvane":
 		settings.disable_signup = 0
 		settings.home_page = "spa"
+		settings.app_name = "Runvane"
+		settings.brand_html = "Runvane"
 		settings.save(ignore_permissions=True)
+	frappe.db.set_single_value("System Settings", "app_name", "Runvane")
 	counts = {
 		"roles": _seed_roles(), "playbooks": _seed_playbooks(), "guides": _seed_guides(),
 		"terms": _seed_terms(), "templates": _seed_templates(), "badges": _seed_badges(),

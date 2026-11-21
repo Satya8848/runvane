@@ -78,7 +78,7 @@ def index_doc(doc, method=None):
 		else:
 			requests.delete(f"{url}/indexes/{INDEX}/documents/{document_for(doc)['id']}", headers=_headers(key), timeout=TIMEOUT)
 	except requests.RequestException:
-		frappe.log_error(title="StackPilot search index", message=frappe.get_traceback())
+		frappe.log_error(title="Runvane search index", message=frappe.get_traceback())
 
 
 def rebuild():

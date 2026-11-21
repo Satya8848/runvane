@@ -13,22 +13,27 @@
 		</div>
 	</section>
 
-	<section class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-		<router-link v-for="f in features" :key="f.to" :to="f.to" class="card group transition hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md">
+	<section class="mt-8 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+		<router-link v-for="f in features" :key="f.to" :to="f.to" class="card group !p-4 transition hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md sm:!p-5">
 			<div class="text-2xl" aria-hidden="true">{{ f.icon }}</div>
-			<h2 class="mt-3 font-display text-lg font-semibold group-hover:text-brand-700 dark:group-hover:text-brand-300">{{ f.title }}</h2>
-			<p class="mt-1 text-sm text-ink-500 dark:text-ink-400">{{ f.text }}</p>
+			<h2 class="mt-2 font-display text-base font-semibold group-hover:text-brand-700 dark:group-hover:text-brand-300 sm:mt-3 sm:text-lg">{{ f.title }}</h2>
+			<p class="mt-1 text-xs text-ink-500 dark:text-ink-400 sm:text-sm">{{ f.text }}</p>
 		</router-link>
 	</section>
 
 	<section class="mt-12">
-		<div class="flex items-end justify-between"><h2 class="font-display text-2xl font-bold">Pick your role</h2><span class="text-sm text-ink-500" v-if="data">{{ data.totals.playbook }} playbooks · {{ data.totals.config_guide }} guides · {{ data.totals.interview_item }} interview questions</span></div>
+		<div class="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between"><h2 class="font-display text-2xl font-bold">Pick your role</h2><span class="text-sm text-ink-500" v-if="data">{{ data.totals.playbook }} playbooks · {{ data.totals.config_guide }} guides · {{ data.totals.interview_item }} interview questions</span></div>
 		<div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
 			<router-link v-for="t in data?.tracks || []" :key="t.slug" :to="`/t/${t.slug}`" class="card group relative overflow-hidden transition hover:shadow-md">
 				<span class="absolute inset-x-0 top-0 h-1" :style="{ background: t.color }"></span>
 				<h3 class="font-display text-lg font-semibold">{{ t.title }}</h3>
 				<p class="mt-1 text-sm text-ink-500 dark:text-ink-400">{{ t.tagline }}</p>
 				<p class="mt-4 text-xs font-medium text-ink-400">{{ t.playbooks }} playbooks →</p>
+			</router-link>
+			<router-link v-if="data" to="/ai" class="card group relative overflow-hidden border-dashed !border-brand-300 bg-brand-50/50 transition hover:shadow-md dark:!border-brand-700 dark:bg-brand-900/20">
+				<h3 class="font-display text-lg font-semibold">Not sure where to start?</h3>
+				<p class="mt-1 text-sm text-ink-500 dark:text-ink-400">Describe the problem in your own words. The AI points you to the right fix.</p>
+				<p class="mt-4 text-xs font-medium text-brand-700 dark:text-brand-300">Ask the AI, no account needed →</p>
 			</router-link>
 		</div>
 	</section>
@@ -66,7 +71,7 @@ const data = ref(null);
 const suggestions = ["502 after deploy", "disk full", "replication lag", "secret leaked", "pods pending", "slow query", "OOMKilled"];
 const features = [
 	{ to: "/playbooks", icon: "🧭", title: "Problem playbooks", text: "Symptoms → diagnose → fix → prevent, with copy-ready commands." },
-	{ to: "/ai", icon: "✨", title: "AI analysis", text: "Paste logs, errors, configs or SQL. Secrets are masked before anything is sent." },
+	{ to: "/ai", icon: "✨", title: "AI analysis", text: "Paste logs, errors, configs or SQL. Free to try, secrets masked first." },
 	{ to: "/q", icon: "💬", title: "Community forum", text: "Ask, answer, vote. Every new question gets an AI first draft." },
 	{ to: "/board", icon: "🗺️", title: "Architecture board", text: "Start from templates, draw with text, get an AI design review." },
 ];

@@ -3,22 +3,28 @@
 	<div class="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
 		<aside class="space-y-3">
 			<div class="card !p-3">
-				<button v-for="m in modes" :key="m.value" class="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm" :class="mode === m.value ? 'bg-brand-50 font-semibold text-brand-700 dark:bg-brand-900/40 dark:text-brand-200' : 'hover:bg-ink-50 dark:hover:bg-ink-800'" @click="mode = m.value"><span aria-hidden="true">{{ m.icon }}</span>{{ m.label }}</button>
+				<button v-for="m in modes.filter((x) => session.logged_in || x.value !== 'keys')" :key="m.value" class="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm" :class="mode === m.value ? 'bg-brand-50 font-semibold text-brand-700 dark:bg-brand-900/40 dark:text-brand-200' : 'hover:bg-ink-50 dark:hover:bg-ink-800'" @click="mode = m.value"><span aria-hidden="true">{{ m.icon }}</span>{{ m.label }}</button>
 			</div>
-			<div v-if="status" class="card !p-4 text-xs text-ink-500">
+			<div v-if="status && status.guest" class="card !p-4 text-sm">
+				<p class="font-semibold">{{ status.guest_left }} free {{ status.guest_left === 1 ? "question" : "questions" }} left today</p>
+				<p class="mt-1 text-xs text-ink-500">No account needed. Join free for more questions and saved history.</p>
+				<router-link to="/join?next=/ai" class="btn btn-primary mt-3 w-full justify-center !py-1.5">Join free</router-link>
+			</div>
+			<div v-else-if="status" class="card !p-4 text-xs text-ink-500">
 				<p><b class="text-ink-800 dark:text-ink-100">Today:</b> {{ status.used_today.toLocaleString() }} / {{ status.quota.toLocaleString() }} tokens</p>
-				<p class="mt-1">Site AI: {{ status.site_keys.length ? status.site_keys.join(", ") : "not configured" }}<span v-if="status.budget_reached"> (budget reached)</span></p>
-				<p class="mt-1">Your keys: {{ status.own_keys.length ? status.own_keys.join(", ") : "none" }}</p>
+				<p class="mt-1">Your keys: {{ status.own_keys.length ? status.own_keys.join(", ") : "none (using the site's AI)" }}</p>
 			</div>
+			<p v-if="status && !status.available" class="rounded-xl bg-amber-50 p-3 text-xs text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">AI is being set up on this site. You can still search playbooks and ask the community.</p>
 			<div v-if="convos.length" class="card !p-3 text-sm"><p class="px-2 text-xs font-semibold uppercase text-ink-400">Recent</p><button v-for="c in convos" :key="c.name" class="block w-full truncate rounded-lg px-2 py-1.5 text-left hover:bg-ink-50 dark:hover:bg-ink-800" @click="openConvo(c)">{{ c.title }}</button></div>
 		</aside>
 
 		<section class="min-w-0">
-			<div v-if="!session.logged_in && session.loaded" class="card text-center"><h1 class="font-display text-2xl font-bold">AI assistant</h1><p class="mt-2 text-ink-500">Chat, log and config analysis need a free account (it keeps AI fair for everyone).</p><button class="btn btn-primary mt-4" @click="signIn">Sign in or join</button></div>
-
-			<template v-else-if="mode === 'chat'">
+			<template v-if="mode === 'chat'">
 				<h1 class="font-display text-2xl font-bold">Ask anything</h1>
-				<p class="text-sm text-ink-500">Answers use StackPilot's playbooks and guides and link to them. Secrets you paste are masked before sending.</p>
+				<p class="text-sm text-ink-500">Answers use Runvane's playbooks and guides and link to them. Secrets you paste are masked before sending.</p>
+				<div v-if="!messages.length" class="mt-5 grid gap-2 sm:grid-cols-2">
+					<button v-for="ex in examples" :key="ex" class="rounded-xl border border-ink-100 p-3 text-left text-sm text-ink-600 hover:border-brand-300 hover:text-ink-900 dark:border-ink-800 dark:text-ink-300 dark:hover:text-white" @click="input = ex; send()">{{ ex }}</button>
+				</div>
 				<div class="mt-4 space-y-4">
 					<div v-for="(m, i) in messages" :key="i" class="rounded-2xl p-4" :class="m.role === 'user' ? 'ml-auto max-w-2xl bg-brand-600 text-white' : 'card'">
 						<div v-if="m.role === 'user'" class="whitespace-pre-wrap text-sm">{{ m.content }}</div>
@@ -59,9 +65,15 @@
 <script setup>
 import { onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
-import { AI, call, notify, post, session, signIn } from "../api.js";
+import { AI, call, notify, post, session } from "../api.js";
 import Markdown from "../components/Markdown.vue";
 const route = useRoute();
+const examples = [
+	"My Kubernetes pod gets OOMKilled every night. How do I find out why?",
+	"How do I set up OIDC from Azure DevOps to AWS without access keys?",
+	"nginx gives 504 Gateway Timeout behind a load balancer. What should I check?",
+	"Design a highly available web app on AWS for 50k users. What are the trade-offs?",
+];
 const modes = [{ value: "chat", label: "Ask anything", icon: "✨" }, { value: "analyse", label: "Analyse", icon: "🔍" }, { value: "keys", label: "My AI keys", icon: "🔑" }];
 const kinds = [
 	{ value: "logs", label: "Logs", hint: "Paste application, nginx, Kubernetes or system logs…" },
@@ -84,7 +96,10 @@ const question = ref("");
 const analysis = ref(null);
 const keyProvider = ref("claude");
 const keyValue = ref("");
-async function refresh() { if (!session.logged_in) return; status.value = await call(`${AI}.status`).catch(() => null); convos.value = await call(`${AI}.conversations`).catch(() => []); }
+async function refresh() {
+	status.value = await call(`${AI}.status`).catch(() => null);
+	convos.value = session.logged_in ? await call(`${AI}.conversations`).catch(() => []) : [];
+}
 async function send() {
 	if (!input.value.trim() || busy.value) return;
 	const text = input.value; input.value = ""; messages.value.push({ role: "user", content: text }); busy.value = true;

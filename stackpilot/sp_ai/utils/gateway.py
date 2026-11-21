@@ -39,7 +39,7 @@ def run(feature, system, messages, user=None, max_tokens=1800):
 	user = user if user is not None else frappe.session.user
 	provider, key, model, byok = _choose(settings, feature, user)
 	if not byok:
-		_check_limits(settings, user)
+		_check_limits(settings, user, feature)
 	result = providers.complete(provider, key, model, system, messages, max_tokens=max_tokens)
 	_log(settings, user, feature, provider, model, result, byok)
 	return {**result, "provider": provider, "model": model, "byok": byok}
@@ -53,13 +53,16 @@ def status(user):
 		user (str, required): Member.
 
 	Returns:
-		dict: {"enabled", "site_keys", "own_keys", "used_today", "quota", "budget_reached"}
+		dict: {"enabled", "available", "site_keys", "own_keys", "used_today", "quota", "budget_reached", "guest", "guest_left"}
 	"""
 	settings = frappe.get_cached_doc("AI Settings")
 	site_keys = [p for p in ("claude", "gemini", "groq", "openai") if settings.get_password(f"{_field(p)}_api_key", raise_exception=False)]
 	own = frappe.get_all("AI Provider Key", filters={"user": user}, pluck="provider", ignore_permissions=True) if user != "Guest" else []
-	return {"enabled": bool(settings.ai_enabled), "site_keys": site_keys, "own_keys": own, "used_today": _used_today(user),
-		"quota": settings.daily_token_quota, "budget_reached": bool(settings.byok_only)}
+	guest = user == "Guest"
+	return {"enabled": bool(settings.ai_enabled), "available": bool(settings.ai_enabled and (site_keys or own) and not (settings.byok_only and not own)),
+		"site_keys": site_keys, "own_keys": own, "used_today": _used_today(user), "quota": settings.daily_token_quota,
+		"budget_reached": bool(settings.byok_only), "guest": guest,
+		"guest_left": max(int(settings.guest_daily_requests or 0) - guest_requests_today(), 0) if guest else None}
 
 
 def _choose(settings, feature, user):
@@ -92,21 +95,40 @@ def _choose(settings, feature, user):
 	raise AIUnavailable(_("No AI provider is configured yet. Add your own key in AI settings."))
 
 
-def _check_limits(settings, user):
+def _check_limits(settings, user, feature):
 	"""
-	Enforce the per-member daily quota and the site's monthly budget.
+	Enforce the visitor per-IP limit and the per-member daily quota.
+	System jobs (user None, e.g. forum drafts) are only bound by the monthly budget.
 
 	Parameters:
 		settings (Document, required): AI Settings.
-		user (str, required): Member.
+		user (str, optional): Member, "Guest" for visitors, None for system jobs.
+		feature (str, required): Feature being used.
 
 	Returns:
 		None
 	"""
-	if not user or user == "Guest":
-		raise AIUnavailable(_("Sign in to use AI."))
+	if user is None:
+		return
+	if user == "Guest":
+		allowed = int(settings.guest_daily_requests or 0)
+		if not allowed:
+			raise AIUnavailable(_("Join free to use the AI assistant."))
+		if guest_requests_today() >= allowed:
+			raise AIUnavailable(_("You used today's {0} free AI questions. Join free (10 seconds) for more, or come back tomorrow.").format(allowed))
+		return
 	if settings.daily_token_quota and _used_today(user) >= settings.daily_token_quota:
 		raise AIUnavailable(_("You reached today's AI limit. It resets at midnight UTC, or add your own API key."))
+
+
+def guest_requests_today():
+	"""
+	AI requests made today from the visitor's IP without an account.
+
+	Returns:
+		int: Request count.
+	"""
+	return frappe.db.count("AI Usage", {"user": ["is", "not set"], "ip": frappe.local.request_ip, "creation": [">=", frappe.utils.today()]})
 
 
 def _used_today(user):
@@ -145,7 +167,8 @@ def _log(settings, user, feature, provider, model, result, byok):
 	"""
 	usd = 0 if byok else providers.cost(provider, result["tokens_in"], result["tokens_out"])
 	frappe.get_doc({"doctype": "AI Usage", "user": user if user and user != "Guest" else None, "feature": feature, "provider": provider, "model": model,
-		"tokens_in": result["tokens_in"], "tokens_out": result["tokens_out"], "cost_usd": usd, "byok": 1 if byok else 0}).insert(ignore_permissions=True)
+		"tokens_in": result["tokens_in"], "tokens_out": result["tokens_out"], "cost_usd": usd, "byok": 1 if byok else 0,
+		"ip": getattr(frappe.local, "request_ip", None) if user == "Guest" else None}).insert(ignore_permissions=True)
 	if usd:
 		spend = (frappe.db.get_single_value("AI Settings", "month_spend_usd") or 0) + usd
 		values = {"month_spend_usd": spend}

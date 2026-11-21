@@ -3,7 +3,7 @@
 	<div class="mx-auto grid max-w-5xl items-center gap-10 py-6 lg:grid-cols-2">
 		<div>
 			<p class="eyebrow">Free account</p>
-			<h1 class="mt-2 font-display text-4xl font-bold">Join StackPilot</h1>
+			<h1 class="mt-2 font-display text-4xl font-bold">Join Runvane</h1>
 			<ul class="mt-6 space-y-3 text-ink-600 dark:text-ink-300">
 				<li>✨ AI analysis of your logs, errors, configs and SQL</li>
 				<li>💬 Ask the community, with an AI first draft on every question</li>

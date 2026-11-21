@@ -15,5 +15,5 @@ import { call, KB } from "../api.js";
 import Markdown from "../components/Markdown.vue";
 const route = useRoute();
 const g = ref(null);
-watch(() => route.params.slug, async (slug) => { if (slug) { g.value = await call(`${KB}.guide`, { slug }); document.title = `${g.value.title} · StackPilot`; } }, { immediate: true });
+watch(() => route.params.slug, async (slug) => { if (slug) { g.value = await call(`${KB}.guide`, { slug }); document.title = `${g.value.title} · Runvane`; } }, { immediate: true });
 </script>

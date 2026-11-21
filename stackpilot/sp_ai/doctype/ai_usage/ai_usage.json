@@ -16,7 +16,8 @@
   "tokens_in",
   "tokens_out",
   "cost_usd",
-  "byok"
+  "byok",
+  "ip"
  ],
  "fields": [
   {
@@ -64,6 +65,12 @@
    "fieldname": "byok",
    "fieldtype": "Check",
    "label": "User's Own Key"
+  },
+  {
+   "fieldname": "ip",
+   "fieldtype": "Data",
+   "label": "Visitor IP",
+   "search_index": 1
   }
  ],
  "permissions": [

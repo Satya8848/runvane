@@ -44,7 +44,7 @@ const d = ref(null);
 const body = ref("");
 const busy = ref(false);
 const preview = ref(false);
-async function load() { d.value = await call(`${FORUM}.question`, { name: route.params.name }); document.title = `${d.value.question.title} · StackPilot`; }
+async function load() { d.value = await call(`${FORUM}.question`, { name: route.params.name }); document.title = `${d.value.question.title} · Runvane`; }
 const commentsFor = (name) => (d.value?.comments || []).filter((c) => c.reference_name === name);
 async function submit() {
 	if (!session.logged_in) return signIn();

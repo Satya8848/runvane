@@ -14,7 +14,7 @@ from stackpilot.sp_ai.utils.masking import mask
 from stackpilot.utils import search as search_engine
 
 BASE_SYSTEM = (
-	"You are StackPilot, a senior engineer helping DevOps, DevSecOps, solution architects, programmers, "
+	"You are Runvane, a senior engineer helping DevOps, DevSecOps, solution architects, programmers, "
 	"Linux administrators, database administrators and cloud engineers. Answer precisely and practically: "
 	"commands in fenced code blocks, real config, the why behind each step, and risks. Say when you are not sure. "
 	"Never ask for secrets. Never claim to have run anything. Use Markdown."
@@ -48,16 +48,18 @@ def chat(message, conversation=None, role_track=None):
 	text, masked = mask((message or "").strip()[:12000])
 	if not text:
 		frappe.throw(_("Type a question."))
-	conv = _conversation(conversation, "chat", text, role_track)
+	guest = frappe.session.user == "Guest"
+	conv = None if guest else _conversation(conversation, "chat", text, role_track)
 	hits = [h for h in search_engine.search(text[:200], limit=6)["hits"]][:5]
 	context = "\n".join(f"- [{h['kind']}] {h['title']} ({h['url']}): {h.get('excerpt', '')}" for h in hits)
 	system = BASE_SYSTEM + (f"\nThe member works as: {role_track}." if role_track else "") + (
-		f"\n\nRelevant StackPilot pages (cite them by title and link when you use them):\n{context}" if context else "")
-	history = frappe.get_all("AI Message", filters={"conversation": conv}, fields=["role", "content"], order_by="creation desc", limit=10, ignore_permissions=True)[::-1]
+		f"\n\nRelevant Runvane pages (cite them by title and link when you use them):\n{context}" if context else "")
+	history = [] if guest else frappe.get_all("AI Message", filters={"conversation": conv}, fields=["role", "content"], order_by="creation desc", limit=10, ignore_permissions=True)[::-1]
 	messages = [{"role": m.role, "content": m.content} for m in history] + [{"role": "user", "content": text}]
-	result = run("chat", system, messages)
-	_store(conv, "user", text, masked=masked)
-	_store(conv, "assistant", result["text"], result=result, sources=hits)
+	result = run("chat", system, messages, max_tokens=1200 if guest else 1800)
+	if conv:
+		_store(conv, "user", text, masked=masked)
+		_store(conv, "assistant", result["text"], result=result, sources=hits)
 	return {"conversation": conv, "answer": result["text"], "sources": hits, "masked": masked, "provider": result["provider"]}
 
 
@@ -81,10 +83,14 @@ def analyse(kind, text, role_track=None, question=None):
 		frappe.throw(_("Paste the logs, error or config to analyse."))
 	ask = (question or "").strip()[:1000]
 	prompt = f"{ANALYSERS[kind]}\n{ANALYSE_FORMAT}\n" + (f"\nThe member asks: {ask}\n" if ask else "") + f"\n```\n{content}\n```"
-	conv = _conversation(None, "analyse", f"{kind}: {ask or content[:60]}", role_track)
-	result = run("analyse", BASE_SYSTEM, [{"role": "user", "content": prompt}], max_tokens=2200)
-	_store(conv, "user", prompt, masked=masked)
-	_store(conv, "assistant", result["text"], result=result)
+	guest = frappe.session.user == "Guest"
+	if guest:
+		prompt = prompt[:12000]
+	conv = None if guest else _conversation(None, "analyse", f"{kind}: {ask or content[:60]}", role_track)
+	result = run("analyse", BASE_SYSTEM, [{"role": "user", "content": prompt}], max_tokens=1400 if guest else 2200)
+	if conv:
+		_store(conv, "user", prompt, masked=masked)
+		_store(conv, "assistant", result["text"], result=result)
 	return {"conversation": conv, "answer": result["text"], "masked": masked, "provider": result["provider"]}
 
 
@@ -112,7 +118,7 @@ def draft_forum_answer(question):
 	except Exception as exc:
 		frappe.db.set_value("Question", question, "ai_draft_status", "Skipped" if "configured" in str(exc) or "turned off" in str(exc) else "Failed", update_modified=False)
 		return
-	note = "\n\n---\n*AI draft by StackPilot ({0}). Check it before you run anything; vote or answer to improve it.*".format(result["provider"])
+	note = "\n\n---\n*AI draft by Runvane ({0}). Check it before you run anything; vote or answer to improve it.*".format(result["provider"])
 	post_answer(question, result["text"] + note, is_ai=True, provider=result["provider"])
 	frappe.db.set_value("Question", question, "ai_draft_status", "Done", update_modified=False)
 
