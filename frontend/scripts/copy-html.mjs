@@ -7,6 +7,6 @@ const root = path.resolve(import.meta.dirname, "..");
 const html = fs
 	.readFileSync(path.join(root, "../stackpilot/public/spa/index.html"), "utf8")
 	.replace("<head>", "<head>\n    <script>window.csrf_token = '{{ frappe.session.csrf_token }}'; window.sp_boot = {{ boot | tojson }};</script>\n    <title>{{ meta_title }}</title>\n    <meta name=\"description\" content=\"{{ meta_description }}\">\n    <meta property=\"og:title\" content=\"{{ meta_title }}\">\n    <meta property=\"og:description\" content=\"{{ meta_description }}\">")
-	.replace(/<title>StackPilot<\/title>/, "");
+	.replace(/<title>[^<]*<\/title>\s*(?=<link)/, "");
 fs.writeFileSync(path.join(root, "../stackpilot/www/spa.html"), html);
 console.log("wrote www/spa.html");

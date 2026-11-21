@@ -74,6 +74,8 @@ def seed():
 		settings.brand_html = "Runvane"
 		settings.save(ignore_permissions=True)
 	frappe.db.set_single_value("System Settings", "app_name", "Runvane")
+	if frappe.db.get_single_value("AI Settings", "guest_daily_requests") is None:
+		frappe.db.set_single_value("AI Settings", "guest_daily_requests", 5)
 	counts = {
 		"roles": _seed_roles(), "playbooks": _seed_playbooks(), "guides": _seed_guides(),
 		"terms": _seed_terms(), "templates": _seed_templates(), "badges": _seed_badges(),
