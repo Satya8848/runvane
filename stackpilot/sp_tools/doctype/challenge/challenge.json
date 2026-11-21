@@ -1,0 +1,88 @@
+{
+ "actions": [],
+ "creation": "2026-11-21 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "modified": "2026-11-21 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "SP Tools",
+ "name": "Challenge",
+ "owner": "Administrator",
+ "field_order": [
+  "title",
+  "role_track",
+  "active",
+  "prompt",
+  "broken",
+  "model_answer"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Title",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "role_track",
+   "fieldtype": "Link",
+   "label": "Role Track",
+   "options": "Role Track",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "active",
+   "fieldtype": "Check",
+   "label": "Active",
+   "default": "1"
+  },
+  {
+   "fieldname": "prompt",
+   "fieldtype": "Markdown Editor",
+   "label": "Prompt"
+  },
+  {
+   "fieldname": "broken",
+   "fieldtype": "Code",
+   "label": "Broken Config / Code"
+  },
+  {
+   "fieldname": "model_answer",
+   "fieldtype": "Markdown Editor",
+   "label": "Model Answer"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "SP Editor",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1
+  },
+  {
+   "role": "All",
+   "read": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "links": [],
+ "row_format": "Dynamic",
+ "description": "A weekly fix-it challenge.",
+ "autoname": "hash",
+ "title_field": "title",
+ "naming_rule": "Random"
+}

@@ -1,0 +1,195 @@
+{
+ "actions": [],
+ "creation": "2026-11-21 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "modified": "2026-11-21 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "SP AI",
+ "name": "AI Settings",
+ "owner": "Administrator",
+ "field_order": [
+  "s1",
+  "anthropic_api_key",
+  "anthropic_model",
+  "gemini_api_key",
+  "gemini_model",
+  "c1",
+  "groq_api_key",
+  "groq_model",
+  "openai_api_key",
+  "openai_model",
+  "s2",
+  "chat_provider",
+  "analyse_provider",
+  "c2",
+  "forum_draft_provider",
+  "diagram_provider",
+  "builder_provider",
+  "s3",
+  "daily_token_quota",
+  "monthly_budget_usd",
+  "month_spend_usd",
+  "c3",
+  "ai_enabled",
+  "byok_only"
+ ],
+ "fields": [
+  {
+   "fieldname": "s1",
+   "fieldtype": "Section Break",
+   "label": "Providers"
+  },
+  {
+   "fieldname": "anthropic_api_key",
+   "fieldtype": "Password",
+   "label": "Anthropic (Claude) API Key"
+  },
+  {
+   "fieldname": "anthropic_model",
+   "fieldtype": "Data",
+   "label": "Anthropic Model",
+   "default": "claude-sonnet-5-5"
+  },
+  {
+   "fieldname": "gemini_api_key",
+   "fieldtype": "Password",
+   "label": "Google Gemini API Key"
+  },
+  {
+   "fieldname": "gemini_model",
+   "fieldtype": "Data",
+   "label": "Gemini Model",
+   "default": "gemini-2.5-flash"
+  },
+  {
+   "fieldname": "c1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "groq_api_key",
+   "fieldtype": "Password",
+   "label": "Groq API Key"
+  },
+  {
+   "fieldname": "groq_model",
+   "fieldtype": "Data",
+   "label": "Groq Model",
+   "default": "llama-3.3-70b-versatile"
+  },
+  {
+   "fieldname": "openai_api_key",
+   "fieldtype": "Password",
+   "label": "OpenAI API Key"
+  },
+  {
+   "fieldname": "openai_model",
+   "fieldtype": "Data",
+   "label": "Openai Model",
+   "default": "gpt-4.1-mini"
+  },
+  {
+   "fieldname": "s2",
+   "fieldtype": "Section Break",
+   "label": "Routing (provider per feature)"
+  },
+  {
+   "fieldname": "chat_provider",
+   "fieldtype": "Select",
+   "label": "Chat Provider",
+   "options": "claude\ngemini\ngroq\nopenai",
+   "default": "claude"
+  },
+  {
+   "fieldname": "analyse_provider",
+   "fieldtype": "Select",
+   "label": "Analyse Provider",
+   "options": "claude\ngemini\ngroq\nopenai",
+   "default": "claude"
+  },
+  {
+   "fieldname": "c2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "forum_draft_provider",
+   "fieldtype": "Select",
+   "label": "Forum Draft Provider",
+   "options": "claude\ngemini\ngroq\nopenai",
+   "default": "groq"
+  },
+  {
+   "fieldname": "diagram_provider",
+   "fieldtype": "Select",
+   "label": "Diagram Provider",
+   "options": "claude\ngemini\ngroq\nopenai",
+   "default": "claude"
+  },
+  {
+   "fieldname": "builder_provider",
+   "fieldtype": "Select",
+   "label": "Builder Provider",
+   "options": "claude\ngemini\ngroq\nopenai",
+   "default": "claude"
+  },
+  {
+   "fieldname": "s3",
+   "fieldtype": "Section Break",
+   "label": "Limits"
+  },
+  {
+   "fieldname": "daily_token_quota",
+   "fieldtype": "Int",
+   "label": "Daily Token Quota",
+   "default": "60000",
+   "description": "Per member per day, site keys only."
+  },
+  {
+   "fieldname": "monthly_budget_usd",
+   "fieldtype": "Currency",
+   "label": "Monthly Budget Usd",
+   "default": "25"
+  },
+  {
+   "fieldname": "month_spend_usd",
+   "fieldtype": "Currency",
+   "label": "Month Spend Usd",
+   "read_only": 1
+  },
+  {
+   "fieldname": "c3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "ai_enabled",
+   "fieldtype": "Check",
+   "label": "Ai Enabled",
+   "default": "1"
+  },
+  {
+   "fieldname": "byok_only",
+   "fieldtype": "Check",
+   "label": "Site Keys Paused (Budget Reached)",
+   "read_only": 1
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "links": [],
+ "row_format": "Dynamic",
+ "description": "AI providers, keys, routing per feature, quotas and the monthly spend cap.",
+ "issingle": 1,
+ "naming_rule": ""
+}

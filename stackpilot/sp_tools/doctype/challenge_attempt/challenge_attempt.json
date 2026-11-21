@@ -1,0 +1,69 @@
+{
+ "actions": [],
+ "creation": "2026-11-21 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "modified": "2026-11-21 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "SP Tools",
+ "name": "Challenge Attempt",
+ "owner": "Administrator",
+ "field_order": [
+  "challenge",
+  "answer",
+  "score",
+  "feedback"
+ ],
+ "fields": [
+  {
+   "fieldname": "challenge",
+   "fieldtype": "Link",
+   "label": "Challenge",
+   "options": "Challenge",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "answer",
+   "fieldtype": "Long Text",
+   "label": "Answer"
+  },
+  {
+   "fieldname": "score",
+   "fieldtype": "Int",
+   "label": "Score",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "feedback",
+   "fieldtype": "Markdown Editor",
+   "label": "Feedback"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "SP Member",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "if_owner": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "links": [],
+ "row_format": "Dynamic",
+ "description": "A member's answer to a challenge and its feedback.",
+ "autoname": "hash",
+ "naming_rule": "Random"
+}

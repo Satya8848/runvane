@@ -1,0 +1,89 @@
+{
+ "actions": [],
+ "creation": "2026-11-21 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "modified": "2026-11-21 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "SP Tools",
+ "name": "Cloud Offering",
+ "owner": "Administrator",
+ "field_order": [
+  "provider",
+  "category",
+  "service",
+  "strengths",
+  "price_note",
+  "price_snapshot"
+ ],
+ "fields": [
+  {
+   "fieldname": "provider",
+   "fieldtype": "Select",
+   "label": "Provider",
+   "options": "AWS\nAzure\nGCP\nDigitalOcean\nHetzner\nOracle Cloud",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "category",
+   "fieldtype": "Data",
+   "label": "Category",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "service",
+   "fieldtype": "Data",
+   "label": "Service",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "strengths",
+   "fieldtype": "Small Text",
+   "label": "Strengths"
+  },
+  {
+   "fieldname": "price_note",
+   "fieldtype": "Data",
+   "label": "Price Note"
+  },
+  {
+   "fieldname": "price_snapshot",
+   "fieldtype": "Date",
+   "label": "Price Snapshot"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "SP Editor",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1
+  },
+  {
+   "role": "All",
+   "read": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "links": [],
+ "row_format": "Dynamic",
+ "description": "One cloud provider's service in a category, with a dated price note.",
+ "autoname": "hash",
+ "title_field": "service",
+ "naming_rule": "Random"
+}

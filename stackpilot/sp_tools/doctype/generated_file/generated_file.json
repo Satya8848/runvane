@@ -1,0 +1,76 @@
+{
+ "actions": [],
+ "creation": "2026-11-21 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "modified": "2026-11-21 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "SP Tools",
+ "name": "Generated File",
+ "owner": "Administrator",
+ "field_order": [
+  "title",
+  "generator",
+  "inputs_json",
+  "files_json",
+  "lint_report"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Title",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "generator",
+   "fieldtype": "Data",
+   "label": "Generator",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "inputs_json",
+   "fieldtype": "Code",
+   "label": "Inputs Json",
+   "options": "JSON"
+  },
+  {
+   "fieldname": "files_json",
+   "fieldtype": "Code",
+   "label": "Files Json",
+   "options": "JSON"
+  },
+  {
+   "fieldname": "lint_report",
+   "fieldtype": "Long Text",
+   "label": "Lint Report"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "SP Member",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "if_owner": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "links": [],
+ "row_format": "Dynamic",
+ "description": "Output of a builder (Ansible, setup script, monitoring config).",
+ "autoname": "hash",
+ "title_field": "title",
+ "naming_rule": "Random"
+}

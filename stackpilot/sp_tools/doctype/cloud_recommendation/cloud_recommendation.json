@@ -1,0 +1,68 @@
+{
+ "actions": [],
+ "creation": "2026-11-21 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "modified": "2026-11-21 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "SP Tools",
+ "name": "Cloud Recommendation",
+ "owner": "Administrator",
+ "field_order": [
+  "inputs_json",
+  "scores_json",
+  "winner",
+  "explanation"
+ ],
+ "fields": [
+  {
+   "fieldname": "inputs_json",
+   "fieldtype": "Code",
+   "label": "Inputs Json",
+   "options": "JSON"
+  },
+  {
+   "fieldname": "scores_json",
+   "fieldtype": "Code",
+   "label": "Scores Json",
+   "options": "JSON"
+  },
+  {
+   "fieldname": "winner",
+   "fieldtype": "Data",
+   "label": "Winner",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "explanation",
+   "fieldtype": "Markdown Editor",
+   "label": "Explanation"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "SP Member",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "if_owner": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "links": [],
+ "row_format": "Dynamic",
+ "description": "One cloud-advisor result.",
+ "autoname": "hash",
+ "naming_rule": "Random"
+}

@@ -53,3 +53,7 @@ jspm_packages/
 
 # Aider AI Chat
 .aider*
+frontend/node_modules
+stackpilot/public/spa
+stackpilot/www/spa.html
+deploy/.env

@@ -1,0 +1,5 @@
+frontend/node_modules
+**/__pycache__
+.git
+stackpilot/public/spa
+stackpilot/www/spa.html

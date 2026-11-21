@@ -1,1 +1,6 @@
-StackPilot
+SP Core
+SP Knowledge
+SP Forum
+SP AI
+SP Studio
+SP Tools

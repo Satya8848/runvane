@@ -5,6 +5,31 @@ app_description = "Problem-solving platform for DevOps, DevSecOps, architects, p
 app_email = "satya8848@users.noreply.github.com"
 app_license = "mit"
 
+after_install = "stackpilot.install.after_install"
+after_migrate = "stackpilot.install.after_migrate"
+
+# The single-page app answers these paths; Frappe keeps /app (Desk), /api, /login, /assets.
+website_route_rules = [
+	{"from_route": f"/{prefix}/<path:app_path>", "to_route": "spa"}
+	for prefix in ("t", "playbooks", "guides", "q", "ask", "ai", "board", "tools", "glossary", "interview", "search", "u", "learn")
+] + [
+	{"from_route": f"/{prefix}", "to_route": "spa"}
+	for prefix in ("playbooks", "guides", "q", "ask", "ai", "board", "tools", "glossary", "interview", "search", "learn", "join")
+]
+
+scheduler_events = {"monthly": ["stackpilot.sp_ai.tasks.reset_monthly_spend"]}
+
+_INDEXED = {"on_update": "stackpilot.utils.search.index_doc", "on_trash": "stackpilot.utils.search.index_doc"}
+doc_events = {
+	"User": {"after_insert": "stackpilot.sp_core.utils.members.on_user_insert"},
+	"Playbook": _INDEXED,
+	"Config Guide": _INDEXED,
+	"Question": _INDEXED,
+	"SP Term": _INDEXED,
+	"Interview Item": _INDEXED,
+	"Architecture Diagram": _INDEXED,
+}
+
 # Apps
 # ------------------
 

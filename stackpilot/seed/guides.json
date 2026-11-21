@@ -1,0 +1,1034 @@
+{
+ "guides": [
+  {
+   "slug": "linux",
+   "title": "Linux administration",
+   "category": "Foundations",
+   "intro": "Every cloud server, container and Kubernetes node is Linux. Interviews test whether you can find out what a box is doing and fix it calmly: processes, services, disks, users, logs and the network.",
+   "body": "## Key concepts\n\n**Kernel vs user space** — The kernel manages CPU, memory, devices and the network; everything else (shells, services, your app) runs in user space and asks the kernel through system calls.\n\n**systemd** — The init system (PID 1). Starts services from unit files, restarts them on failure, and collects their logs in the journal.\n\n**Permissions** — Owner, group, others × read, write, execute. <code>chmod 640</code> = owner rw, group r, others nothing. Special bits: setuid, setgid, sticky (on /tmp).\n\n**Load average** — Average number of runnable + uninterruptible tasks over 1, 5, 15 min. Compare with the CPU count: load 4 on 2 vCPUs means work is queuing.\n\n**Inodes** — Each file uses one inode. A disk can be 'full' with free space if inodes run out (millions of tiny files).\n\n**LVM** — Logical Volume Manager: physical volumes → volume group → logical volumes, so you can grow a filesystem online.\n\n**OOM killer** — When memory runs out, the kernel kills the process with the highest oom_score. Check <code>dmesg</code> for 'Out of memory'.\n\n**cgroups & namespaces** — Kernel features that limit (cgroups) and isolate (namespaces) processes. Containers are just processes using both.\n\n## Setup & commands\n\n### Who is using CPU, memory and disk\n\n```\nuptime                      # load average\ntop -o %CPU                 # or: htop\nps aux --sort=-%mem | head  # top memory users\nfree -h\ndf -h      # space\ndf -i      # inodes\ndu -xh / --max-depth=1 2>/dev/null | sort -h | tail\n```\n\nFirst five commands on any slow server.\n\n### Services with systemd\n\n```\nsystemctl status nginx\nsudo systemctl restart nginx\nsudo systemctl enable --now myapp\njournalctl -u nginx --since \"1 hour ago\" -f\nsystemctl list-units --failed\n```\n\n<code>enable --now</code> starts it and keeps it on after reboot.\n\n### A minimal service unit\n\n```\n# /etc/systemd/system/myapp.service\n[Unit]\nDescription=My app\nAfter=network-online.target\n\n[Service]\nUser=app\nWorkingDirectory=/opt/myapp\nExecStart=/opt/myapp/venv/bin/gunicorn app:app -b 127.0.0.1:8000\nRestart=on-failure\nEnvironment=PYTHONUNBUFFERED=1\n\n[Install]\nWantedBy=multi-user.target\n\n# then:\nsudo systemctl daemon-reload && sudo systemctl enable --now myapp\n```\n\n### Users, sudo and SSH hardening\n\n```\nsudo adduser deploy && sudo usermod -aG sudo deploy\nsudo mkdir -p /home/deploy/.ssh && sudo chmod 700 /home/deploy/.ssh\n# /etc/ssh/sshd_config\nPermitRootLogin no\nPasswordAuthentication no\nPubkeyAuthentication yes\nsudo sshd -t && sudo systemctl reload ssh\n```\n\nAlways test with <code>sshd -t</code> and keep a second session open before reloading.\n\n### Grow a disk (LVM, ext4/xfs)\n\n```\nlsblk\nsudo growpart /dev/nvme0n1 1          # after enlarging the cloud volume\nsudo pvresize /dev/nvme0n1p1\nsudo lvextend -l +100%FREE /dev/vg0/data\nsudo resize2fs /dev/vg0/data          # ext4  (xfs: sudo xfs_growfs /data)\n```\n\n### Scheduled jobs and logs\n\n```\ncrontab -e\n# m h dom mon dow command\n30 2 * * * /opt/backup.sh >> /var/log/backup.log 2>&1\n\n# logrotate: /etc/logrotate.d/myapp\n/var/log/myapp/*.log {\n  daily\n  rotate 14\n  compress\n  missingok\n  copytruncate\n}\n```\n\n### Packages and patching (Ubuntu)\n\n```\nsudo apt update && apt list --upgradable\nsudo apt-get install --only-upgrade openssl\nsudo unattended-upgrade --dry-run -d\ncat /var/run/reboot-required 2>/dev/null   # reboot needed?\n```\n\nSecurity updates automatically; reboots in a maintenance window.\n",
+   "diagram": ""
+  },
+  {
+   "slug": "networking",
+   "title": "Networking, proxy & nginx",
+   "category": "Foundations",
+   "intro": "How a request reaches your app: DNS, TCP, TLS, firewalls, load balancers and the nginx edge. Most production incidents show up here first as 502, 504 or timeouts.",
+   "body": "## Key concepts\n\n**OSI / TCP-IP layers** — L3 IP routing, L4 TCP/UDP ports, L7 HTTP. An L4 load balancer forwards connections; an L7 one reads HTTP (host, path, headers).\n\n**TCP handshake** — SYN → SYN-ACK → ACK, then TLS handshake, then HTTP. Each round trip adds latency; keep-alive and HTTP/2 reuse connections.\n\n**DNS records** — A/AAAA (IP), CNAME (alias), MX (mail), TXT (verification, SPF), NS (delegation). TTL controls caching: lower it before a migration.\n\n**TLS** — Encrypts traffic and proves the server's identity with a certificate chain. Let's Encrypt issues free 90-day certificates via ACME.\n\n**Reverse proxy** — Sits in front of apps: TLS termination, routing by host/path, caching, compression, rate limits, header rewriting.\n\n**CIDR & subnets** — 10.0.0.0/16 = 65,536 addresses. Public subnets route to an internet gateway; private subnets go out through a NAT gateway.\n\n**502 vs 504** — 502 Bad Gateway: the upstream refused or broke the connection. 504 Gateway Timeout: the upstream did not answer in time.\n\n**Firewalls** — Host: ufw/iptables/nftables. Cloud: security groups (stateful, per instance) and NACLs (stateless, per subnet).\n\n## Setup & commands\n\n### nginx reverse proxy with TLS\n\n```\n# /etc/nginx/conf.d/app.conf\nupstream app { server 127.0.0.1:8000; keepalive 32; }\n\nserver {\n  listen 80;\n  server_name app.example.com;\n  location /.well-known/acme-challenge/ { root /var/www/acme; }\n  location / { return 301 https://$host$request_uri; }\n}\n\nserver {\n  listen 443 ssl http2;\n  server_name app.example.com;\n  ssl_certificate     /etc/letsencrypt/live/app.example.com/fullchain.pem;\n  ssl_certificate_key /etc/letsencrypt/live/app.example.com/privkey.pem;\n  client_max_body_size 20m;\n  gzip on; gzip_types text/css application/javascript application/json;\n\n  location /assets/ { root /srv/app; expires 7d; }\n  location / {\n    proxy_pass http://app;\n    proxy_http_version 1.1;\n    proxy_set_header Connection \"\";\n    proxy_set_header Host $host;\n    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n    proxy_set_header X-Forwarded-Proto $scheme;\n    proxy_read_timeout 120s;\n  }\n}\n```\n\nTest before every reload: <code>sudo nginx -t && sudo systemctl reload nginx</code>\n\n### Certificate with certbot\n\n```\nsudo apt install certbot\nsudo certbot certonly --webroot -w /var/www/acme -d app.example.com\nsudo certbot renew --dry-run\n```\n\nWebroot mode does not edit your nginx files.\n\n### Rate limiting and WebSockets\n\n```\n# http {} block\nlimit_req_zone $binary_remote_addr zone=api:10m rate=20r/s;\nmap $http_upgrade $conn_upgrade { default upgrade; '' close; }\n\n# server {} block\nlocation /api/ { limit_req zone=api burst=40 nodelay; limit_req_status 429; proxy_pass http://app; }\nlocation /socket.io/ {\n  proxy_pass http://127.0.0.1:9000;\n  proxy_http_version 1.1;\n  proxy_set_header Upgrade $http_upgrade;\n  proxy_set_header Connection $conn_upgrade;\n}\n```\n\n### Load balancing across servers\n\n```\nupstream web {\n  least_conn;\n  server 10.0.1.10:8000 max_fails=3 fail_timeout=30s;\n  server 10.0.1.11:8000 max_fails=3 fail_timeout=30s;\n  server 10.0.1.12:8000 backup;\n}\n```\n\nAlgorithms: round robin (default), least_conn, ip_hash (sticky).\n\n### Troubleshoot a request end to end\n\n```\ndig +short app.example.com            # DNS\ncurl -sv https://app.example.com -o /dev/null   # TLS + headers\ncurl -w '%{time_connect} %{time_starttransfer} %{time_total}\\n' -so /dev/null https://app.example.com\nss -tan state established | wc -l      # open connections\nsudo tcpdump -i any port 8000 -nn -c 20\ntail -f /var/log/nginx/error.log\n```\n\n### Host firewall (ufw)\n\n```\nsudo ufw default deny incoming\nsudo ufw allow OpenSSH\nsudo ufw allow 80,443/tcp\nsudo ufw enable && sudo ufw status verbose\n```\n",
+   "diagram": "flowchart LR\n  U[User] -->|DNS lookup| D[(DNS / Cloudflare)]\n  U -->|HTTPS 443| CF[CDN + WAF]\n  CF --> LB[Load balancer / nginx edge<br/>TLS, rate limit, gzip]\n  LB --> A1[App pod 1]\n  LB --> A2[App pod 2]\n  A1 --> DB[(Database)]\n  A2 --> DB\n  A1 --> R[(Redis)]"
+  },
+  {
+   "slug": "docker",
+   "title": "Docker & containers",
+   "category": "Build & run",
+   "intro": "Containers package an app with everything it needs so it runs the same on a laptop, in CI and in production. Interviews focus on image design, security and debugging.",
+   "body": "## Key concepts\n\n**Image vs container** — An image is a read-only template of layers; a container is a running instance with a thin writable layer on top.\n\n**Layers & cache** — Each Dockerfile instruction adds a layer. Order from least to most changing (deps before code) so rebuilds reuse the cache.\n\n**Multi-stage build** — Build in one stage with compilers and tools, copy only the result into a slim final stage.\n\n**Registry** — Stores images by name:tag (Docker Hub, ECR, ACR, GHCR). Tag by git SHA so you always know what runs.\n\n**Volumes** — Data that outlives the container. Named volumes are managed by Docker; bind mounts map a host path.\n\n**Networking** — bridge (default, NAT), host (share the host stack), none. Containers on one user-defined network resolve each other by name.\n\n## Setup & commands\n\n### A production Dockerfile (Python)\n\n```\nFROM python:3.12-slim AS build\nWORKDIR /app\nCOPY requirements.txt .\nRUN pip wheel --no-cache-dir -r requirements.txt -w /wheels\n\nFROM python:3.12-slim\nRUN useradd -m app\nWORKDIR /app\nCOPY --from=build /wheels /wheels\nRUN pip install --no-cache-dir /wheels/* && rm -rf /wheels\nCOPY --chown=app:app . .\nUSER app\nEXPOSE 8000\nHEALTHCHECK CMD python -c \"import urllib.request;urllib.request.urlopen('http://localhost:8000/health')\"\nCMD [\"gunicorn\", \"app:app\", \"-b\", \"0.0.0.0:8000\", \"-w\", \"2\"]\n```\n\nNon-root user, no build tools in the final image, health check.\n\n### Build, tag, push\n\n```\ndocker build -t myapp:$(git rev-parse --short HEAD) .\ndocker tag myapp:abc1234 123456789012.dkr.ecr.us-east-2.amazonaws.com/myapp:abc1234\naws ecr get-login-password | docker login --username AWS --password-stdin 123456789012.dkr.ecr.us-east-2.amazonaws.com\ndocker push 123456789012.dkr.ecr.us-east-2.amazonaws.com/myapp:abc1234\n```\n\n### Run and debug\n\n```\ndocker run -d --name web -p 8000:8000 --memory 512m --cpus 1 myapp:abc1234\ndocker logs -f web\ndocker exec -it web sh\ndocker stats\ndocker inspect web --format '{{.State.OOMKilled}} {{.State.ExitCode}}'\n```\n\n### docker compose for local dev\n\n```\nservices:\n  web:\n    build: .\n    ports: [\"8000:8000\"]\n    environment: { DATABASE_URL: \"mysql://app:pw@db/app\" }\n    depends_on: [db]\n  db:\n    image: mariadb:11.4\n    environment: { MARIADB_ROOT_PASSWORD: pw, MARIADB_DATABASE: app }\n    volumes: [dbdata:/var/lib/mysql]\nvolumes: { dbdata: {} }\n```\n\n### Scan an image\n\n```\ntrivy image --severity HIGH,CRITICAL --ignore-unfixed myapp:abc1234\nsyft myapp:abc1234 -o spdx-json > sbom.json\n```\n",
+   "diagram": ""
+  },
+  {
+   "slug": "kubernetes",
+   "title": "Kubernetes & EKS",
+   "category": "Build & run",
+   "intro": "Kubernetes runs containers across machines and keeps them in the state you declare. Platform-engineer interviews go deep here: scheduling, scaling, rollouts, networking and debugging.",
+   "body": "## Key concepts\n\n**Pod** — Smallest unit: one or more containers sharing network and volumes. Disposable; never rely on its IP.\n\n**Deployment → ReplicaSet → Pod** — A Deployment declares replicas and a pod template; each template change makes a new ReplicaSet (a revision you can roll back to).\n\n**Service** — Stable DNS name + virtual IP load-balancing to ready pods. ClusterIP (internal), NodePort, LoadBalancer.\n\n**Ingress / Gateway API** — L7 routing by host and path into Services, implemented by an ingress controller (nginx, AWS Load Balancer Controller).\n\n**Probes** — Readiness: may it get traffic? Liveness: should it be restarted? Startup: give slow apps time before liveness starts.\n\n**Requests & limits** — Requests reserve resources for scheduling; limits cap them. Over the CPU limit → throttled; over memory → OOMKilled.\n\n**HPA** — Adds/removes pods to keep average CPU (or a custom metric) near a target. Needs metrics-server and CPU requests.\n\n**EKS specifics** — Managed control plane; VPC CNI gives pods VPC IPs; IRSA/Pod Identity maps ServiceAccounts to IAM roles; Karpenter or managed node groups for capacity.\n\n## Setup & commands\n\n### Everyday kubectl\n\n```\nkubectl get pods -n prod -o wide\nkubectl describe pod <pod> -n prod          # events, last state\nkubectl logs <pod> -n prod --previous       # logs of the crashed run\nkubectl top pods -n prod\nkubectl get events -n prod --sort-by=.lastTimestamp | tail\nkubectl exec -it <pod> -n prod -- sh\n```\n\n### Deployment with probes, resources and rolling update\n\n```\napiVersion: apps/v1\nkind: Deployment\nmetadata: { name: web, namespace: prod }\nspec:\n  replicas: 3\n  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 1, maxUnavailable: 0 } }\n  selector: { matchLabels: { app: web } }\n  template:\n    metadata: { labels: { app: web } }\n    spec:\n      containers:\n        - name: web\n          image: 123456789012.dkr.ecr.us-east-2.amazonaws.com/web:abc1234\n          ports: [{ containerPort: 8000 }]\n          readinessProbe: { httpGet: { path: /health, port: 8000 }, periodSeconds: 5 }\n          livenessProbe: { httpGet: { path: /health, port: 8000 }, initialDelaySeconds: 30 }\n          resources:\n            requests: { cpu: 100m, memory: 256Mi }\n            limits:   { cpu: 500m, memory: 512Mi }\n```\n\n### Rollout, rollback, scale\n\n```\nkubectl -n prod set image deploy/web web=web:def5678\nkubectl -n prod rollout status deploy/web\nkubectl -n prod rollout history deploy/web\nkubectl -n prod rollout undo deploy/web --to-revision=3\nkubectl -n prod autoscale deploy/web --min=3 --max=10 --cpu-percent=70\n```\n\n### Create an EKS cluster (eksctl)\n\n```\neksctl create cluster --name platform --region us-east-2 \\\n  --version 1.31 --nodegroup-name general --node-type t3.large \\\n  --nodes 3 --nodes-min 2 --nodes-max 6 --managed --with-oidc\naws eks update-kubeconfig --name platform --region us-east-2\nhelm repo add eks https://aws.github.io/eks-charts\nhelm install aws-load-balancer-controller eks/aws-load-balancer-controller -n kube-system \\\n  --set clusterName=platform --set serviceAccount.create=false --set serviceAccount.name=aws-load-balancer-controller\n```\n\nCosts money (control plane ~$0.10/h + nodes). Delete with <code>eksctl delete cluster --name platform</code>.\n\n### Local cluster to practise for free\n\n```\ncurl -sfL https://get.k3s.io | sh -              # single-node k3s\n# or\nkind create cluster --name lab\nkubectl create deployment web --image=nginx --replicas=2\nkubectl expose deployment web --port=80\nkubectl delete pod -l app=web --wait=false && kubectl get pods -w   # watch self-healing\n```\n\n### Helm release\n\n```\nhelm upgrade --install web ./chart -n prod -f values-prod.yaml --set image.tag=abc1234 --wait --timeout 10m\nhelm history web -n prod\nhelm rollback web 4 -n prod\n```\n",
+   "diagram": "flowchart TB\n  subgraph CP[Control plane]\n    API[API server] --- ETCD[(etcd)]\n    API --- SCH[Scheduler]\n    API --- CM[Controllers]\n  end\n  subgraph N1[Worker node]\n    KL[kubelet] --> CR[containerd]\n    KP[kube-proxy]\n    P1[Pod] & P2[Pod]\n  end\n  kubectl --> API\n  API --> KL\n  ING[Ingress / LB] --> SVC[Service] --> P1 & P2"
+  },
+  {
+   "slug": "cicd",
+   "title": "CI/CD: Azure DevOps, Jenkins, GitHub Actions",
+   "category": "Delivery",
+   "intro": "Pipelines turn a commit into a tested, versioned artifact and a safe deployment. Interviews cover YAML pipelines, branch policies, artifacts, approvals and deployment strategies.",
+   "body": "## Key concepts\n\n**Continuous integration** — Every change is merged often and verified automatically (build, tests, scans).\n\n**Continuous delivery vs deployment** — Delivery: every passing build is releasable, a human approves prod. Deployment: it goes to prod automatically.\n\n**Azure Repos branch policies** — Protect main: minimum reviewers, linked work items, comment resolution, build validation (a pipeline must pass on the PR).\n\n**Artifacts** — Versioned build outputs: container images, packages (Azure Artifacts feeds: npm, NuGet, PyPI, Maven), pipeline artifacts.\n\n**Environments & approvals** — Azure DevOps Environments hold approvals, checks (business hours, required template) and deployment history.\n\n**Templates** — Reusable YAML (stages/jobs/steps templates) and <code>extends</code> templates to enforce security steps across teams.\n\n**Agents** — Microsoft-hosted (fresh VM per job) or self-hosted (your VMs, VMSS or Kubernetes) for private network access.\n\n**Deployment strategies** — Rolling, blue/green, canary; feature flags decouple deploy from release.\n\n## Setup & commands\n\n### Azure DevOps multi-stage YAML\n\n```\ntrigger:\n  branches: { include: [main] }\npr:\n  branches: { include: [main] }\n\nvariables:\n  - group: app-prod-kv      # linked to Key Vault\n  - name: imageTag\n    value: $(Build.SourceVersion)\n\nstages:\n- stage: Build\n  jobs:\n  - job: build\n    pool: { vmImage: ubuntu-latest }\n    steps:\n    - script: pip install -r requirements.txt && pytest -q\n      displayName: Unit tests\n    - task: Docker@2\n      inputs:\n        command: buildAndPush\n        containerRegistry: acr-service-connection\n        repository: web\n        tags: $(imageTag)\n\n- stage: Deploy_Staging\n  dependsOn: Build\n  jobs:\n  - deployment: deploy\n    environment: staging\n    strategy:\n      runOnce:\n        deploy:\n          steps:\n          - task: HelmDeploy@0\n            inputs:\n              connectionType: Kubernetes Service Connection\n              kubernetesServiceEndpoint: aks-staging\n              command: upgrade\n              chartType: FilePath\n              chartPath: chart\n              releaseName: web\n              overrideValues: image.tag=$(imageTag)\n\n- stage: Deploy_Prod\n  dependsOn: Deploy_Staging\n  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))\n  jobs:\n  - deployment: deploy\n    environment: prod      # approvals + checks configured on this Environment\n    strategy: { runOnce: { deploy: { steps: [ { script: echo deploy prod } ] } } }\n```\n\n### Reusable step template\n\n```\n# templates/security-scan.yml\nparameters: [{ name: image, type: string }]\nsteps:\n- script: |\n    curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b .\n    ./trivy image --exit-code 1 --severity CRITICAL --ignore-unfixed ${{ parameters.image }}\n  displayName: Trivy image scan\n\n# use it\nsteps:\n- template: templates/security-scan.yml\n  parameters: { image: myacr.azurecr.io/web:$(imageTag) }\n```\n\n### Jenkins declarative pipeline\n\n```\npipeline {\n  agent { kubernetes { yamlFile 'ci/pod.yaml' } }\n  options { timeout(time: 30, unit: 'MINUTES'); disableConcurrentBuilds() }\n  stages {\n    stage('Test')  { steps { container('python') { sh 'pytest -q' } } }\n    stage('Build') { steps { container('kaniko') { sh '/kaniko/executor --destination=$IMAGE:$GIT_COMMIT' } } }\n    stage('Deploy') {\n      when { branch 'main' }\n      steps { container('helm') { sh 'helm upgrade --install web chart --set image.tag=$GIT_COMMIT --wait' } }\n    }\n  }\n  post { failure { echo 'notify on-call channel' } }\n}\n```\n\n### GitHub Actions to AWS with OIDC\n\n```\nname: deploy\non: { push: { branches: [main] } }\npermissions: { id-token: write, contents: read }\njobs:\n  deploy:\n    runs-on: ubuntu-latest\n    environment: prod\n    steps:\n      - uses: actions/checkout@v4\n      - uses: aws-actions/configure-aws-credentials@v4\n        with: { role-to-assume: arn:aws:iam::123456789012:role/gha-deploy, aws-region: us-east-2 }\n      - uses: aws-actions/amazon-ecr-login@v2\n      - run: |\n          docker build -t $ECR/web:${GITHUB_SHA::7} .\n          docker push $ECR/web:${GITHUB_SHA::7}\n```\n\nNo stored AWS keys: the job exchanges a short-lived OIDC token for a role.\n",
+   "diagram": "flowchart LR\n  PR[Pull request] -->|branch policy: build + review| M[main]\n  M --> B[Build & unit tests]\n  B --> S[Security scans<br/>SAST · SCA · secrets]\n  S --> I[Image build + scan<br/>push to registry]\n  I --> D1[Deploy staging]\n  D1 --> T[Smoke + integration tests]\n  T -->|approval| D2[Deploy prod<br/>canary → full]\n  D2 --> MON[Monitor SLOs<br/>auto rollback]"
+  },
+  {
+   "slug": "iac",
+   "title": "Infrastructure as Code: Terraform & Pulumi",
+   "category": "Delivery",
+   "intro": "Infrastructure described in code, reviewed in PRs and applied by pipelines. Expect questions on state, modules, environments, drift and safe applies.",
+   "body": "## Key concepts\n\n**Declarative** — You describe the end state; the tool computes the plan (create, update, delete) to reach it.\n\n**State** — Maps code to real resource IDs. Keep it remote, locked and encrypted (S3 + DynamoDB, Azure Storage, Terraform Cloud).\n\n**Modules** — Reusable building blocks (vpc, eks, rds) with inputs and outputs, versioned and pinned.\n\n**Plan / apply** — Always review the plan; apply the saved plan file so what runs is what was approved.\n\n**Drift** — Reality changed outside code (console clicks). Detect with scheduled plans; fix by importing or reverting.\n\n**Pulumi** — Same idea with real languages (Python, TypeScript, Go): loops, functions, tests and packages for free.\n\n## Setup & commands\n\n### Remote state and providers\n\n```\nterraform {\n  required_version = \">= 1.8\"\n  required_providers { aws = { source = \"hashicorp/aws\", version = \"~> 5.70\" } }\n  backend \"s3\" {\n    bucket         = \"acme-tf-state\"\n    key            = \"prod/network.tfstate\"\n    region         = \"us-east-2\"\n    dynamodb_table = \"tf-locks\"\n    encrypt        = true\n  }\n}\nprovider \"aws\" { region = \"us-east-2\" default_tags { tags = { env = \"prod\", owner = \"platform\" } } }\n```\n\n### VPC with the community module\n\n```\nmodule \"vpc\" {\n  source  = \"terraform-aws-modules/vpc/aws\"\n  version = \"5.13.0\"\n  name = \"prod\"\n  cidr = \"10.0.0.0/16\"\n  azs             = [\"us-east-2a\", \"us-east-2b\", \"us-east-2c\"]\n  public_subnets  = [\"10.0.0.0/20\", \"10.0.16.0/20\", \"10.0.32.0/20\"]\n  private_subnets = [\"10.0.64.0/19\", \"10.0.96.0/19\", \"10.0.128.0/19\"]\n  enable_nat_gateway = true\n  one_nat_gateway_per_az = true\n}\noutput \"private_subnets\" { value = module.vpc.private_subnets }\n```\n\n### Workflow in a pipeline\n\n```\nterraform fmt -check -recursive\nterraform init -input=false\nterraform validate\ntflint && checkov -d .\nterraform plan -input=false -out=tfplan\nterraform show -no-color tfplan > plan.txt   # post to the PR\n# after approval\nterraform apply -input=false tfplan\n```\n\n### State surgery (carefully)\n\n```\nterraform state list\nterraform import aws_s3_bucket.logs acme-logs\nterraform state mv aws_instance.web module.web.aws_instance.this\nterraform plan -detailed-exitcode   # exit 2 = drift/changes\n```\n\n### Pulumi in Python\n\n```\nimport pulumi\nimport pulumi_aws as aws\n\nbucket = aws.s3.BucketV2(\"logs\", tags={\"env\": pulumi.get_stack()})\naws.s3.BucketPublicAccessBlock(\"logs-block\", bucket=bucket.id,\n    block_public_acls=True, block_public_policy=True,\n    ignore_public_acls=True, restrict_public_buckets=True)\npulumi.export(\"bucket\", bucket.id)\n\n# pulumi stack init prod && pulumi preview && pulumi up\n```\n",
+   "diagram": ""
+  },
+  {
+   "slug": "python",
+   "title": "Python for automation",
+   "category": "Delivery",
+   "intro": "DevOps Python is about reliable scripts: talk to APIs and clouds, handle failures, log clearly and exit with the right code.",
+   "body": "## Key concepts\n\n**Exceptions** — Catch specific exceptions, add context, re-raise or exit non-zero. Never swallow errors with a bare <code>except:</code>.\n\n**Retries with backoff** — Retry only transient errors (timeouts, 429, 5xx) and only idempotent calls; back off exponentially with jitter.\n\n**Timeouts** — Every network call needs one; the default for <code>requests</code> is to wait forever.\n\n**Logging** — Use the <code>logging</code> module with levels and context, JSON logs for machines.\n\n**Exit codes** — 0 success, non-zero failure, so cron and pipelines notice.\n\n**boto3 / Azure SDK** — Official SDKs; use paginators and the default credential chain (roles, not keys).\n\n## Setup & commands\n\n### HTTP call with retries, timeouts and logging\n\n```\nimport logging, random, sys, time\nimport requests\n\nlog = logging.getLogger(\"health\")\nRETRYABLE = {429, 500, 502, 503, 504}\n\n\ndef get_json(url, attempts=5, timeout=5):\n    for attempt in range(1, attempts + 1):\n        try:\n            resp = requests.get(url, timeout=timeout)\n            if resp.status_code in RETRYABLE:\n                raise requests.HTTPError(f\"retryable {resp.status_code}\", response=resp)\n            resp.raise_for_status()\n            return resp.json()\n        except (requests.ConnectionError, requests.Timeout, requests.HTTPError) as exc:\n            status = getattr(exc.response, \"status_code\", None)\n            if attempt == attempts or (status and status not in RETRYABLE):\n                raise\n            delay = min(2 ** attempt, 30) + random.uniform(0, 1)\n            log.warning(\"attempt %s failed: %s; retry in %.1fs\", attempt, exc, delay)\n            time.sleep(delay)\n\n\nif __name__ == \"__main__\":\n    logging.basicConfig(level=logging.INFO, format=\"%(asctime)s %(levelname)s %(message)s\")\n    try:\n        print(get_json(sys.argv[1]))\n    except Exception as exc:\n        log.error(\"health check failed: %s\", exc)\n        sys.exit(1)\n```\n\n### boto3: find untagged and unencrypted resources\n\n```\nimport boto3\n\nec2 = boto3.client(\"ec2\", region_name=\"us-east-2\")\nfor page in ec2.get_paginator(\"describe_volumes\").paginate():\n    for vol in page[\"Volumes\"]:\n        tags = {t[\"Key\"]: t[\"Value\"] for t in vol.get(\"Tags\", [])}\n        if not vol[\"Encrypted\"] or \"owner\" not in tags:\n            print(vol[\"VolumeId\"], vol[\"Encrypted\"], tags.get(\"owner\"))\n```\n\n### Context managers and cleanup\n\n```\nfrom contextlib import contextmanager\n\n@contextmanager\ndef maintenance(service):\n    disable(service)\n    try:\n        yield\n    finally:\n        enable(service)   # runs even when the body fails\n\nwith maintenance(\"web\"):\n    run_migration()\n```\n",
+   "diagram": ""
+  },
+  {
+   "slug": "aws",
+   "title": "AWS",
+   "category": "Cloud",
+   "intro": "The AWS services that come up in nearly every DevOps and platform interview, with how they fit together.",
+   "body": "## Key concepts\n\n**IAM** — Users, groups, roles and policies. Prefer roles with short-lived credentials; least privilege; SCPs in Organizations as guardrails.\n\n**VPC** — Your private network: subnets per AZ, route tables, internet/NAT gateways, security groups, NACLs, endpoints.\n\n**EC2 & Auto Scaling** — VMs; launch templates + Auto Scaling groups; burstable (t3) vs compute/memory optimised families; Spot for interruptible work.\n\n**ELB** — ALB (L7, host/path routing, WAF), NLB (L4, static IPs, very high throughput).\n\n**EKS / ECS / Fargate** — Managed Kubernetes / AWS's own orchestrator / serverless compute for both.\n\n**Storage** — S3 (objects, lifecycle, versioning), EBS (block volumes per instance), EFS (shared NFS).\n\n**Databases** — RDS/Aurora (managed SQL, Multi-AZ, read replicas), DynamoDB (key-value, serverless), ElastiCache (Redis).\n\n**Observability & security** — CloudWatch (metrics, logs, alarms), CloudTrail (API audit), GuardDuty (threats), Security Hub, Config (compliance), KMS (keys).\n\n## Setup & commands\n\n### CLI basics\n\n```\naws sts get-caller-identity\naws configure sso && aws sso login --profile prod\naws ec2 describe-instances --filters Name=tag:env,Values=prod \\\n  --query 'Reservations[].Instances[].[InstanceId,State.Name,PrivateIpAddress]' --output table\naws logs tail /aws/eks/platform/cluster --follow\n```\n\n### GitHub OIDC trust for a deploy role\n\n```\n# trust policy of role gha-deploy\n{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [{\n    \"Effect\": \"Allow\",\n    \"Principal\": { \"Federated\": \"arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com\" },\n    \"Action\": \"sts:AssumeRoleWithWebIdentity\",\n    \"Condition\": {\n      \"StringEquals\": { \"token.actions.githubusercontent.com:aud\": \"sts.amazonaws.com\" },\n      \"StringLike\":   { \"token.actions.githubusercontent.com:sub\": \"repo:Satya8848/taskflow-launchpad:ref:refs/heads/main\" }\n    }\n  }]\n}\n```\n\n### CloudWatch alarm on 5xx\n\n```\naws cloudwatch put-metric-alarm --alarm-name alb-5xx-high \\\n  --namespace AWS/ApplicationELB --metric-name HTTPCode_Target_5XX_Count \\\n  --dimensions Name=LoadBalancer,Value=app/prod-alb/abc123 \\\n  --statistic Sum --period 60 --evaluation-periods 5 --threshold 50 \\\n  --comparison-operator GreaterThanThreshold \\\n  --alarm-actions arn:aws:sns:us-east-2:123456789012:pagerduty\n```\n\n### Systems Manager instead of SSH\n\n```\naws ssm start-session --target i-0abc123\naws ssm send-command --document-name AWS-RunPatchBaseline \\\n  --targets Key=tag:PatchGroup,Values=web --parameters Operation=Install\n```\n\nPatch Manager + maintenance windows patch fleets without opening port 22.\n",
+   "diagram": "flowchart LR\n  R53[Route 53] --> CF[CloudFront + WAF]\n  CF --> ALB[ALB<br/>ACM TLS]\n  subgraph VPC[VPC · 3 AZs]\n    ALB --> EKS[EKS nodes<br/>private subnets]\n    EKS --> RDS[(RDS Multi-AZ)]\n    EKS --> EC[(ElastiCache)]\n    EKS --> S3[(S3 via endpoint)]\n  end\n  EKS -.IRSA.-> IAM[IAM roles]\n  EKS -.-> CW[CloudWatch / Datadog]\n  ECR[ECR] --> EKS\n  SM[Secrets Manager] -.ESO.-> EKS"
+  },
+  {
+   "slug": "azure",
+   "title": "Azure",
+   "category": "Cloud",
+   "intro": "Azure equivalents and the identity and secrets model that Azure-heavy interviews focus on: Entra ID, managed identities, Key Vault and AKS.",
+   "body": "## Key concepts\n\n**Entra ID (Azure AD)** — Identity for users, apps (service principals) and managed identities. RBAC roles assigned at management group, subscription, resource group or resource scope.\n\n**Managed identity** — An identity Azure manages for a resource (VM, App Service, AKS workload); no secrets to rotate.\n\n**Key Vault** — Stores secrets, keys and certificates; access via RBAC (Key Vault Secrets User) with audit logs and soft delete/purge protection.\n\n**AKS** — Managed Kubernetes; Workload Identity federates Kubernetes ServiceAccounts to Entra ID.\n\n**Networking** — VNet, subnets, NSGs, Application Gateway (L7 + WAF), Front Door (global edge), Private Endpoints.\n\n**Monitoring** — Azure Monitor, Log Analytics (KQL), Application Insights; Datadog integrates through the Azure integration.\n\n## Setup & commands\n\n### az CLI basics\n\n```\naz login && az account set --subscription <id>\naz group create -n rg-app-prod -l centralindia\naz aks create -g rg-app-prod -n aks-prod --node-count 2 --enable-oidc-issuer --enable-workload-identity --generate-ssh-keys\naz aks get-credentials -g rg-app-prod -n aks-prod\n```\n\n### Key Vault and access\n\n```\naz keyvault create -n kv-app-prod -g rg-app-prod --enable-rbac-authorization true\naz keyvault secret set --vault-name kv-app-prod -n db-password --value \"$DB_PASSWORD\"\naz role assignment create --role \"Key Vault Secrets User\" \\\n  --assignee <principal-id> --scope $(az keyvault show -n kv-app-prod --query id -o tsv)\n```\n\n### Pipeline reads Key Vault (Azure DevOps)\n\n```\nsteps:\n- task: AzureKeyVault@2\n  inputs:\n    azureSubscription: sc-prod-oidc     # service connection with workload identity federation\n    KeyVaultName: kv-app-prod\n    SecretsFilter: 'db-password,api-key'\n    RunAsPreJob: true\n- script: ./deploy.sh\n  env:\n    DB_PASSWORD: $(db-password)        # masked in logs\n```\n",
+   "diagram": ""
+  },
+  {
+   "slug": "cloudflare",
+   "title": "Cloudflare: DNS, WAF, CDN, Zero Trust",
+   "category": "Cloud",
+   "intro": "Cloudflare sits in front of your origin: DNS, caching, the web application firewall, bot and DDoS protection, and Zero Trust access for internal tools.",
+   "body": "## Key concepts\n\n**Proxied DNS** — Orange-cloud records route traffic through Cloudflare (hides the origin IP, enables CDN/WAF); grey-cloud is DNS only.\n\n**SSL modes** — Full (strict) encrypts to the origin and validates its certificate (use an Origin CA cert). Flexible is insecure to the origin.\n\n**Cache rules** — Cache static assets long, bypass for APIs and logged-in pages; purge on deploy or use versioned file names.\n\n**WAF** — Managed rulesets (OWASP, Cloudflare), custom rules (expressions on path, country, ASN, bot score), rate limiting rules.\n\n**Zero Trust Access** — Puts SSO, MFA and device checks in front of internal apps instead of a VPN.\n\n**Tunnel** — <code>cloudflared</code> makes an outbound connection to Cloudflare, so the origin needs no public inbound port.\n\n## Setup & commands\n\n### WAF custom rule expressions\n\n```\n# Block login attempts from outside the allowed countries\n(http.request.uri.path eq \"/api/method/login\" and not ip.geoip.country in {\"IN\" \"US\"})\n\n# Challenge likely bots on the API\n(starts_with(http.request.uri.path, \"/api/\") and cf.bot_management.score lt 30)\n```\n\nActions: Block, Managed Challenge, Log. Start in Log mode, then enforce.\n\n### Tunnel to an internal tool\n\n```\ncloudflared tunnel login\ncloudflared tunnel create launchpad\ncat > ~/.cloudflared/config.yml <<EOF\ntunnel: launchpad\ncredentials-file: /home/ubuntu/.cloudflared/<id>.json\ningress:\n  - hostname: launchpad.example.com\n    service: http://127.0.0.1:30080\n  - service: http_status:404\nEOF\ncloudflared tunnel route dns launchpad launchpad.example.com\nsudo cloudflared service install\n```\n\nThen add an Access application for launchpad.example.com with your SSO policy.\n\n### Origin lockdown on nginx\n\n```\n# allow only Cloudflare edge IPs (refresh the list from https://www.cloudflare.com/ips/)\nset_real_ip_from 173.245.48.0/20;\n# ... other ranges ...\nreal_ip_header CF-Connecting-IP;\n```\n",
+   "diagram": "flowchart LR\n  U[Users] --> CFE[Cloudflare edge<br/>DNS · CDN · WAF · rate limits]\n  CFE -->|Full strict TLS| O[Origin nginx]\n  E[Engineers] --> ACC[Cloudflare Access<br/>SSO + MFA + device posture]\n  ACC --> T[Cloudflare Tunnel] --> ADM[Admin tools<br/>no open inbound port]"
+  },
+  {
+   "slug": "observability",
+   "title": "Observability: Datadog, metrics, logs, traces",
+   "category": "Operate",
+   "intro": "Know what the system is doing from its outputs. Datadog-focused interviews ask about APM, log management, dashboards, monitors and correlating signals across services.",
+   "body": "## Key concepts\n\n**Three signals** — Metrics (numbers over time), logs (events), traces (one request across services). Correlate them with shared tags and trace IDs.\n\n**Unified service tagging** — <code>env</code>, <code>service</code>, <code>version</code> on every metric, log and trace, so you can pivot between them.\n\n**APM** — Distributed tracing: spans per service call with latency and errors; service maps and flame graphs.\n\n**Log pipelines** — Parse (grok/JSON), enrich, index only what you search; archive the rest to S3/Blob cheaply.\n\n**Monitors** — Metric, log, APM, composite and SLO burn-rate monitors with thresholds, recovery, and notification routing.\n\n**RED & USE** — RED for services: Rate, Errors, Duration. USE for resources: Utilisation, Saturation, Errors.\n\n**SLI / SLO / error budget** — Indicator, target and the allowed failure that drives release decisions.\n\n## Setup & commands\n\n### Datadog agent on Kubernetes (Helm)\n\n```\nhelm repo add datadog https://helm.datadoghq.com\nkubectl create secret generic datadog-secret --from-literal api-key=$DD_API_KEY\nhelm install datadog datadog/datadog -f - <<EOF\ndatadog:\n  apiKeyExistingSecret: datadog-secret\n  site: datadoghq.com\n  logs: { enabled: true, containerCollectAll: true }\n  apm: { portEnabled: true }\n  processAgent: { enabled: true }\nclusterAgent: { enabled: true }\nEOF\n```\n\n### Tag the app and trace it (Python)\n\n```\nenv:\n  - { name: DD_ENV, value: prod }\n  - { name: DD_SERVICE, value: web }\n  - { name: DD_VERSION, value: abc1234 }\n  - { name: DD_LOGS_INJECTION, value: \"true\" }   # trace_id in logs\n  - name: DD_AGENT_HOST\n    valueFrom: { fieldRef: { fieldPath: status.hostIP } }\n# start command\nddtrace-run gunicorn app:app -b 0.0.0.0:8000\n```\n\n### Monitor as code (Terraform)\n\n```\nresource \"datadog_monitor\" \"web_errors\" {\n  name    = \"[prod] web 5xx rate above 2%\"\n  type    = \"query alert\"\n  query   = \"sum(last_5m):sum:trace.flask.request.errors{env:prod,service:web}.as_count() / sum:trace.flask.request.hits{env:prod,service:web}.as_count() > 0.02\"\n  message = <<EOT\n5xx above 2% on web. Runbook: https://wiki/runbooks/web-5xx\n@pagerduty-platform\nEOT\n  monitor_thresholds { critical = 0.02, warning = 0.01 }\n  require_full_window = false\n}\n```\n",
+   "diagram": "flowchart LR\n  APP[App + tracer] -->|traces| AG[Datadog agent<br/>DaemonSet]\n  APP -->|logs stdout| AG\n  K8S[Kubelet / cAdvisor] -->|metrics| AG\n  AG --> DD[(Datadog)]\n  DD --> DASH[Dashboards]\n  DD --> MON[Monitors / SLOs]\n  MON --> PD[PagerDuty]"
+  },
+  {
+   "slug": "oncall",
+   "title": "On-call & incident response: PagerDuty",
+   "category": "Operate",
+   "intro": "Live on-call is part of the platform role: how alerts reach people, how incidents are run, and how the team learns from them.",
+   "body": "## Key concepts\n\n**Service & integration** — A PagerDuty service per system, receiving events (Datadog, CloudWatch via SNS, Events API v2).\n\n**Escalation policy** — Who is paged, in what order, after how long without acknowledgement.\n\n**Schedules** — Rotations (weekly primary/secondary), overrides, follow-the-sun across time zones.\n\n**Urgency** — High urgency pages immediately; low urgency notifies during working hours.\n\n**Incident roles** — Incident commander, communications lead, subject-matter experts, scribe.\n\n**Postmortem** — Blameless review: timeline, impact, root cause, contributing factors, action items with owners and dates.\n\n**MTTA / MTTR** — Mean time to acknowledge / to resolve; track them to improve.\n\n## Setup & commands\n\n### Send an alert to PagerDuty (Events API v2)\n\n```\ncurl -s -X POST https://events.pagerduty.com/v2/enqueue \\\n  -H 'Content-Type: application/json' \\\n  -d '{\n    \"routing_key\": \"'$PD_ROUTING_KEY'\",\n    \"event_action\": \"trigger\",\n    \"dedup_key\": \"web-5xx-prod\",\n    \"payload\": {\n      \"summary\": \"web 5xx above 2% in prod\",\n      \"source\": \"datadog\",\n      \"severity\": \"critical\",\n      \"custom_details\": { \"runbook\": \"https://wiki/runbooks/web-5xx\" }\n    }\n  }'\n# resolve later with \"event_action\": \"resolve\" and the same dedup_key\n```\n\n### Incident checklist\n\n```\n1. Acknowledge, open the incident channel, set severity\n2. Assess impact: who, what, since when; recent changes?\n3. Mitigate first: roll back, scale out, fail over, feature flag off\n4. Communicate every 15-30 min (status page, stakeholders)\n5. Resolve and verify against the SLO\n6. Postmortem within 5 working days\n```\n",
+   "diagram": ""
+  },
+  {
+   "slug": "devsecops",
+   "title": "DevSecOps & CI/CD security",
+   "category": "Secure",
+   "intro": "Security built into the pipeline and the platform: secrets in Key Vault or Secrets Manager, OIDC instead of stored keys, locked-down service connections, scanning at every stage, and supply-chain integrity.",
+   "body": "## Key concepts\n\n**Shift left** — Find issues in the PR, where they are cheapest to fix, but keep runtime checks because new CVEs appear after release.\n\n**SAST / SCA / DAST** — Static code analysis (Semgrep, bandit), dependency vulnerabilities (Dependabot, pip-audit, Snyk), dynamic testing of the running app (OWASP ZAP).\n\n**Secrets management** — Central vault (Key Vault, Secrets Manager, Vault), access by identity, rotation, never in Git, images or logs.\n\n**OIDC federation** — CI gets short-lived cloud credentials per run from a signed identity token: no static keys to leak.\n\n**Service connections** — Scoped to the least resources, restricted to named pipelines, protected by approvals and checks, using workload identity federation.\n\n**Supply chain** — SBOM per artifact, signed images (cosign), provenance (SLSA), pinned dependencies, verified at admission.\n\n**Policy as code** — OPA Gatekeeper / Kyverno in clusters, Checkov/tfsec on IaC, Azure Policy / AWS SCPs in the cloud.\n\n## Setup & commands\n\n### Scans in a pipeline\n\n```\ngitleaks detect --source . --redact --exit-code 1\nsemgrep ci --config p/ci\nbandit -r app -ll\npip-audit -r requirements.txt\ncheckov -d infra/ --quiet\ntrivy image --exit-code 1 --severity CRITICAL --ignore-unfixed $IMAGE\nsyft $IMAGE -o cyclonedx-json > sbom.json\ncosign sign --yes $IMAGE\n```\n\n### DAST baseline against staging\n\n```\ndocker run --rm -v $(pwd):/zap/wrk ghcr.io/zaproxy/zaproxy:stable \\\n  zap-baseline.py -t https://staging.example.com -r zap-report.html -I\n```\n\n### Kubernetes admission policy (Kyverno)\n\n```\napiVersion: kyverno.io/v1\nkind: ClusterPolicy\nmetadata: { name: baseline }\nspec:\n  validationFailureAction: Enforce\n  rules:\n  - name: no-latest-tag\n    match: { any: [ { resources: { kinds: [Pod] } } ] }\n    validate:\n      message: \"Use an immutable image tag\"\n      pattern: { spec: { containers: [ { image: \"!*:latest\" } ] } }\n  - name: run-as-non-root\n    match: { any: [ { resources: { kinds: [Pod] } } ] }\n    validate:\n      message: \"Containers must run as non-root\"\n      pattern: { spec: { securityContext: { runAsNonRoot: true } } }\n```\n\n### Secrets into Kubernetes from AWS (External Secrets)\n\n```\napiVersion: external-secrets.io/v1beta1\nkind: ExternalSecret\nmetadata: { name: db, namespace: prod }\nspec:\n  refreshInterval: 1h\n  secretStoreRef: { name: aws-secrets-manager, kind: ClusterSecretStore }\n  target: { name: db-credentials }\n  data:\n    - secretKey: password\n      remoteRef: { key: prod/db, property: password }\n```\n",
+   "diagram": "flowchart LR\n  DEV[Developer] -->|pre-commit: gitleaks| PR[Pull request]\n  PR --> SAST[SAST · SCA · IaC scan]\n  SAST --> BUILD[Build image<br/>SBOM + sign]\n  BUILD --> SCAN[Image scan<br/>fail on Critical]\n  SCAN --> REG[(Registry)]\n  REG --> ADM[Admission policy<br/>signed · non-root · no latest]\n  ADM --> RUN[Runtime<br/>Falco · GuardDuty]\n  KV[(Key Vault / Secrets Manager)] -.OIDC.-> BUILD\n  KV -.CSI / ESO.-> RUN"
+  },
+  {
+   "slug": "patching",
+   "title": "Patch management & vulnerability compliance",
+   "category": "Secure",
+   "intro": "Keeping servers, images and endpoints patched on a schedule, proving compliance, and recovering when a patch breaks something. Ivanti and similar tools automate this for fleets.",
+   "body": "## Key concepts\n\n**Patch lifecycle** — Discover → assess → prioritise → test → schedule → deploy → verify → report.\n\n**Ivanti** — Ivanti Neurons / Security Controls: agent-based scanning, patch catalogue, deployment templates, scheduling, reboot control and compliance reports for Windows and Linux.\n\n**Prioritisation** — CVSS severity, EPSS (likelihood of exploitation), CISA KEV (known exploited), asset exposure and business criticality.\n\n**Rings / waves** — Pilot → early adopters → broad → critical systems, with health checks between waves.\n\n**Maintenance windows** — Agreed times for reboots and risky patches; emergency process for actively exploited CVEs.\n\n**Containers** — Patch by rebuilding images on updated bases and redeploying; never patch running containers.\n\n**Rollback** — Snapshots/AMIs before patching, package downgrade, previous image tag, blue/green for critical services.\n\n## Setup & commands\n\n### Linux: what needs patching\n\n```\nsudo apt update\napt list --upgradable 2>/dev/null | grep -i security\nsudo unattended-upgrade --dry-run -d | tail\n# RHEL/Amazon Linux\nsudo dnf updateinfo list --security\nsudo dnf upgrade --security -y\n```\n\n### AWS Patch Manager (fleet)\n\n```\naws ssm create-patch-baseline --name web-baseline --operating-system UBUNTU \\\n  --approval-rules 'PatchRules=[{PatchFilterGroup={PatchFilters=[{Key=PRIORITY,Values=[Required,Important]}]},ApproveAfterDays=7}]'\naws ssm send-command --document-name AWS-RunPatchBaseline \\\n  --targets Key=tag:PatchGroup,Values=web --parameters Operation=Scan\naws ssm list-compliance-items --resource-ids i-0abc123 --resource-types ManagedInstance\n```\n\n### Image vulnerability compliance\n\n```\ntrivy image --format json -o report.json myapp:abc1234\ntrivy image --severity CRITICAL --exit-code 1 --ignore-unfixed myapp:abc1234\n# re-scan everything running in the cluster\ntrivy k8s --report summary cluster\n```\n\n### Rollback options\n\n```\n# package\nsudo apt-get install openssl=3.0.13-0ubuntu3.1\nsudo apt-mark hold openssl\n# VM: restore pre-patch snapshot / AMI\n# Kubernetes: previous image\nkubectl -n prod rollout undo deploy/web\n```\n",
+   "diagram": "flowchart LR\n  A[Discover assets] --> B[Scan vulnerabilities]\n  B --> C[Prioritise<br/>CVSS · EPSS · KEV · exposure]\n  C --> D[Test in pilot ring]\n  D --> E[Schedule window]\n  E --> F[Deploy in rings]\n  F --> G[Verify & report compliance]\n  F -.failure.-> R[Rollback]"
+  },
+  {
+   "slug": "architecture",
+   "title": "Solution architecture",
+   "category": "Design",
+   "intro": "How the pieces fit: availability, security and performance trade-offs, high-level reference designs, and how to talk about them in an interview.",
+   "body": "## Key concepts\n\n**Availability** — Remove single points of failure: multiple AZs, health checks, automatic failover, stateless app tier.\n\n**Scalability** — Scale out stateless tiers, cache hot reads, move slow work to queues, partition data when one DB is not enough.\n\n**Performance** — Measure p95/p99, not averages; find the bottleneck with load tests; cache, index, batch.\n\n**Security** — Defence in depth: edge WAF, private networking, least-privilege identities, encryption in transit and at rest, audit logs.\n\n**Cost** — Right-size, autoscale, commit for baseline, Spot for burst, tag everything for ownership.\n\n**Trade-offs** — CAP, consistency vs latency, build vs buy, managed services vs control; write them down as ADRs.\n\n**Well-Architected** — AWS/Azure frameworks: operational excellence, security, reliability, performance, cost, sustainability.\n\n## Setup & commands\n\n### Architecture decision record (ADR) template\n\n```\n# ADR-007: Use managed PostgreSQL instead of self-hosted\nStatus: Accepted · Date: 2026-11-21\n\n## Context\nWe run PostgreSQL on EC2; backups and failover are manual.\n\n## Decision\nMove to RDS Multi-AZ with automated backups and PITR.\n\n## Consequences\n+ Automatic failover (< 2 min), managed patching\n- Higher cost (~25%), less control over extensions\n```\n\n### Back-of-the-envelope capacity\n\n```\nPeak users            10,000 concurrent\nRequests per user     1 every 10 s       → 1,000 req/s\nOne pod (load test)   60 req/s at p95 < 300 ms\nPods needed           1,000 / 60 ≈ 17 → 20 with headroom, spread over 3 AZs\nDB                    20% writes = 200 writes/s → one primary + read replicas for reads\n```\n",
+   "diagram": "flowchart TB\n  subgraph Edge\n    DNS[DNS] --> CDN[CDN + WAF]\n  end\n  CDN --> LB[Load balancer]\n  subgraph Region A\n    LB --> APP1[App tier · autoscaled]\n    APP1 --> CACHE[(Cache)]\n    APP1 --> DBP[(DB primary)]\n    APP1 --> Q[[Queue]] --> W[Workers]\n  end\n  DBP -.sync replica.-> DBS[(DB standby · other AZ)]\n  DBP -.async.-> DR[(DR region)]\n  APP1 --> OBJ[(Object storage)]\n  OBS[Observability · SLOs · on-call] -.-> APP1"
+  },
+  {
+   "slug": "bash",
+   "title": "Bash scripting",
+   "category": "Foundations",
+   "intro": "Glue for everything: deploy scripts, health checks, cron jobs and CI steps. Interviews look for safe scripts that fail loudly.",
+   "body": "## Key concepts\n\n**Strict mode** — <code>set -euo pipefail</code>: exit on error, error on unset variables, fail a pipeline if any command in it fails.\n\n**Quoting** — Always quote variables (<code>\"$file\"</code>) so spaces and globs do not split them.\n\n**Exit codes** — <code>$?</code> holds the last exit code; 0 is success. <code>cmd || handle</code>, <code>cmd && next</code>.\n\n**Traps** — <code>trap cleanup EXIT</code> runs cleanup however the script ends.\n\n**Here-docs** — Write multi-line files or input inline: <code>cat &gt; file &lt;&lt;'EOF'</code> (quoted EOF = no variable expansion).\n\n**Text tools** — grep, sed, awk, cut, sort, uniq, jq (JSON), xargs: combine them with pipes.\n\n## Setup & commands\n\n### Safe script skeleton\n\n```\n#!/usr/bin/env bash\nset -euo pipefail\nIFS=$'\\n\\t'\n\nlog() { printf '%s %s\\n' \"$(date -u +%FT%TZ)\" \"$*\" >&2; }\ntmp=$(mktemp -d)\ntrap 'rm -rf \"$tmp\"' EXIT\n\nusage() { echo \"usage: $0 <env>\" >&2; exit 2; }\n[[ $# -eq 1 ]] || usage\nenv=$1\n\nlog \"deploying to $env\"\nif ! curl -fsS --retry 5 --retry-delay 3 \"https://$env.example.com/health\" >/dev/null; then\n  log \"health check failed\"; exit 1\nfi\nlog done\n```\n\n### One-liners you will use\n\n```\n# top 10 client IPs in an nginx log\nawk '{print $1}' access.log | sort | uniq -c | sort -rn | head\n# 5xx per minute\nawk '$9 ~ /^5/ {print substr($4,2,17)}' access.log | uniq -c\n# find big files\nfind / -xdev -type f -size +500M -exec ls -lh {} + 2>/dev/null\n# JSON from an API\ncurl -s https://api.github.com/repos/nginx/nginx | jq '.stargazers_count'\n# run on many hosts\nfor h in web1 web2 web3; do ssh \"$h\" 'uptime'; done\n```\n",
+   "diagram": ""
+  },
+  {
+   "slug": "git",
+   "title": "Git & branching strategies",
+   "category": "Foundations",
+   "intro": "Every pipeline starts from Git. Expect questions on branching models, merge vs rebase, recovering mistakes and protecting main.",
+   "body": "## Key concepts\n\n**Commit / SHA** — A snapshot with a unique hash; the short SHA names an exact version (and makes a good image tag).\n\n**Trunk-based development** — Short-lived branches merged to main daily behind feature flags; best fit for continuous delivery.\n\n**GitFlow** — develop/release/hotfix branches; heavier, suits versioned products with scheduled releases.\n\n**Merge vs rebase** — Merge keeps history as it happened (merge commit); rebase replays commits for a linear history. Never rebase shared branches.\n\n**Tags & SemVer** — MAJOR.MINOR.PATCH: breaking / feature / fix. Annotated tags mark releases.\n\n**Protected branches** — Require PRs, reviews, passing checks, signed commits; block force-push.\n\n## Setup & commands\n\n### Daily workflow\n\n```\ngit switch -c feature/rate-limit\ngit add -p                      # stage hunks deliberately\ngit commit -m \"feat(proxy): add rate limit on /api\"\ngit fetch origin && git rebase origin/main\ngit push -u origin feature/rate-limit\n```\n\n### Fix mistakes\n\n```\ngit commit --amend               # fix the last commit (not pushed)\ngit restore --staged file        # unstage\ngit revert <sha>                 # undo a pushed commit safely\ngit reset --hard HEAD~1          # drop local commit (careful)\ngit reflog                       # find 'lost' commits\ngit cherry-pick <sha>            # copy a fix to another branch\ngit bisect start; git bisect bad; git bisect good v1.3.0   # find the breaking commit\n```\n\n### Remove a leaked secret from history\n\n```\npip install git-filter-repo\ngit filter-repo --replace-text <(echo 'AKIA...==>REMOVED')\ngit push --force --all\n# then ROTATE the secret: history rewriting does not un-leak it\n```\n",
+   "diagram": "gitGraph\n  commit id: \"init\"\n  branch feature/login\n  checkout feature/login\n  commit id: \"add form\"\n  commit id: \"tests\"\n  checkout main\n  merge feature/login id: \"PR #12\"\n  commit id: \"release v1.4\" tag: \"v1.4.0\"\n  branch hotfix/csrf\n  commit id: \"fix\"\n  checkout main\n  merge hotfix/csrf"
+  },
+  {
+   "slug": "gitops",
+   "title": "Helm & GitOps with Argo CD",
+   "category": "Delivery",
+   "intro": "Helm packages Kubernetes apps; GitOps makes Git the source of truth for what runs, with a controller that keeps the cluster in sync.",
+   "body": "## Key concepts\n\n**Chart** — Templates + default values + metadata; <code>helm template</code> renders them, <code>helm upgrade --install</code> applies a release.\n\n**Values per environment** — values.yaml defaults, values-prod.yaml overrides; keep secrets out (External Secrets, SOPS).\n\n**Pull vs push deploys** — Push: CI runs kubectl/helm against the cluster. Pull (GitOps): an in-cluster agent pulls from Git, so CI needs no cluster credentials.\n\n**Argo CD Application** — Points at a repo path + target cluster/namespace; syncs automatically or on demand; shows drift and health.\n\n**Promotion** — Promote by PR: change the image tag in the staging folder, then prod, with review and history.\n\n**Kustomize** — Template-free overlays (base + patches) built into kubectl; Argo CD supports both.\n\n## Setup & commands\n\n### Create and test a chart\n\n```\nhelm create web\nhelm lint web\nhelm template web ./web -f values-prod.yaml | kubectl apply --dry-run=server -f -\nhelm upgrade --install web ./web -n prod -f values-prod.yaml --set image.tag=abc1234 --wait --atomic\n```\n\n<code>--atomic</code> rolls back automatically if the upgrade fails.\n\n### Install Argo CD and add an app\n\n```\nkubectl create namespace argocd\nkubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml\nkubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d\n\ncat <<'EOF' | kubectl apply -f -\napiVersion: argoproj.io/v1alpha1\nkind: Application\nmetadata: { name: web-prod, namespace: argocd }\nspec:\n  project: default\n  source: { repoURL: https://github.com/acme/deploy, path: apps/web/prod, targetRevision: main }\n  destination: { server: https://kubernetes.default.svc, namespace: prod }\n  syncPolicy: { automated: { prune: true, selfHeal: true }, syncOptions: [CreateNamespace=true] }\nEOF\n```\n",
+   "diagram": "flowchart LR\n  DEV[Developer PR<br/>bump image tag] --> GIT[(Git: env repo)]\n  CI[CI builds image] -->|update tag| GIT\n  ARGO[Argo CD in cluster] -->|pull & compare| GIT\n  ARGO -->|apply diff| K8S[Kubernetes]\n  K8S -->|health / drift| ARGO"
+  },
+  {
+   "slug": "ansible",
+   "title": "Configuration management with Ansible",
+   "category": "Delivery",
+   "intro": "Ansible configures servers over SSH with no agent: packages, files, services, users and patching, in idempotent playbooks.",
+   "body": "## Key concepts\n\n**Inventory** — Hosts and groups (static file or dynamic from AWS/Azure).\n\n**Playbook / play / task** — YAML: which hosts, which tasks, in order; tasks call modules.\n\n**Idempotence** — Modules describe state (package present, service started), so re-runs change nothing if already correct.\n\n**Roles** — Reusable bundles of tasks, templates, handlers and defaults.\n\n**Handlers** — Run once at the end when notified (restart nginx only if its config changed).\n\n**Vault** — <code>ansible-vault</code> encrypts secrets in the repo.\n\n## Setup & commands\n\n### Inventory and ad-hoc commands\n\n```\n# inventory.ini\n[web]\n10.0.1.10\n10.0.1.11\n[web:vars]\nansible_user=ubuntu\n\nansible web -i inventory.ini -m ping\nansible web -i inventory.ini -b -m apt -a 'name=nginx state=present update_cache=yes'\n```\n\n### Playbook: nginx with a template and handler\n\n```\n- hosts: web\n  become: true\n  tasks:\n    - name: Install nginx\n      ansible.builtin.apt: { name: nginx, state: present, update_cache: true }\n    - name: Site config\n      ansible.builtin.template: { src: site.conf.j2, dest: /etc/nginx/conf.d/site.conf, mode: '0644' }\n      notify: reload nginx\n    - name: nginx running\n      ansible.builtin.service: { name: nginx, state: started, enabled: true }\n  handlers:\n    - name: reload nginx\n      ansible.builtin.service: { name: nginx, state: reloaded }\n\n# ansible-playbook -i inventory.ini site.yml --check --diff   (dry run)\n```\n\n### Rolling OS patching\n\n```\n- hosts: web\n  become: true\n  serial: 1            # one host at a time\n  tasks:\n    - ansible.builtin.apt: { upgrade: dist, update_cache: true }\n    - ansible.builtin.stat: { path: /var/run/reboot-required }\n      register: reboot\n    - ansible.builtin.reboot: {}\n      when: reboot.stat.exists\n    - ansible.builtin.uri: { url: 'http://{{ inventory_hostname }}/health', status_code: 200 }\n      retries: 10\n      delay: 6\n```\n",
+   "diagram": ""
+  },
+  {
+   "slug": "gcp",
+   "title": "Google Cloud (GCP)",
+   "category": "Cloud",
+   "intro": "The GCP services and concepts that map to what you know from AWS and Azure, for multi-cloud roles.",
+   "body": "## Key concepts\n\n**Resource hierarchy** — Organisation → folders → projects → resources; IAM policies inherit downwards. Billing and APIs are per project.\n\n**IAM** — Principals (users, groups, service accounts) get roles on resources. Workload Identity Federation for CI and other clouds.\n\n**Networking** — VPCs are global with regional subnets; firewall rules by tags/service accounts; Cloud NAT; Cloud Load Balancing (global anycast).\n\n**Compute** — Compute Engine (VMs, MIGs), GKE (Autopilot/Standard), Cloud Run (serverless containers), Cloud Functions.\n\n**Data** — Cloud SQL, Spanner, Firestore, Bigtable, Memorystore, BigQuery, Cloud Storage.\n\n**Ops** — Cloud Monitoring and Logging, Error Reporting, Cloud Trace; Artifact Registry; Cloud Build; Secret Manager.\n\n## Setup & commands\n\n### gcloud basics\n\n```\ngcloud auth login && gcloud config set project acme-prod\ngcloud container clusters create-auto platform --region asia-south1\ngcloud container clusters get-credentials platform --region asia-south1\ngcloud run deploy web --image asia-south1-docker.pkg.dev/acme-prod/apps/web:abc1234 --region asia-south1 --allow-unauthenticated\n```\n",
+   "diagram": ""
+  },
+  {
+   "slug": "serverless",
+   "title": "Serverless & event-driven",
+   "category": "Cloud",
+   "intro": "Run code without managing servers and wire systems together with events: Lambda, Azure Functions, Cloud Run, queues and event buses.",
+   "body": "## Key concepts\n\n**Functions** — Event-triggered code billed per request and duration; scales to zero; limits on run time and memory.\n\n**Cold start** — Latency when a new instance starts; reduce with smaller packages, provisioned concurrency, lighter runtimes.\n\n**Event sources** — HTTP (API Gateway), queues (SQS), streams (Kinesis, DynamoDB streams), schedules, storage events.\n\n**Idempotency** — Events can be delivered more than once; handlers must tolerate duplicates.\n\n**Dead-letter queue** — Where failed events go after retries, for inspection and replay.\n\n**Serverless containers** — Cloud Run, Fargate, Azure Container Apps: containers without managing nodes.\n\n## Setup & commands\n\n### Lambda with AWS SAM\n\n```\n# template.yaml\nResources:\n  Thumbnail:\n    Type: AWS::Serverless::Function\n    Properties:\n      Runtime: python3.12\n      Handler: app.handler\n      MemorySize: 512\n      Timeout: 30\n      Events:\n        Upload: { Type: S3, Properties: { Bucket: !Ref Uploads, Events: s3:ObjectCreated:* } }\n      DeadLetterQueue: { Type: SQS, TargetArn: !GetAtt DLQ.Arn }\n\n# sam build && sam deploy --guided\n```\n",
+   "diagram": "flowchart LR\n  API[API Gateway] --> L1[Lambda: create order]\n  L1 --> DDB[(DynamoDB)]\n  DDB -->|stream| L2[Lambda: send email]\n  L1 --> EB[EventBridge] --> SQS[[SQS]] --> L3[Lambda: invoice]\n  S3[(S3 upload)] -->|event| L4[Lambda: thumbnail]"
+  },
+  {
+   "slug": "data",
+   "title": "Databases, caching & messaging",
+   "category": "Design",
+   "intro": "Most outages and slowdowns end at the data layer. Know replication, backups, connection limits, caching and queues.",
+   "body": "## Key concepts\n\n**Replication** — Primary + replicas: synchronous (no data loss, slower) or asynchronous (fast, replica lag).\n\n**Backups & PITR** — Full snapshots plus logs (binlog/WAL) for point-in-time recovery. A backup you never restored is not a backup.\n\n**Indexes** — Speed reads on filtered/sorted columns; cost writes and space. Check plans with <code>EXPLAIN</code>.\n\n**Connection pooling** — Apps should reuse a pool; too many connections exhaust the database (pgBouncer, ProxySQL, RDS Proxy).\n\n**Caching** — Cache-aside with TTLs in Redis; watch hit ratio, stampedes and invalidation.\n\n**Queues & streams** — Queues (SQS, RabbitMQ) hand work to one consumer; streams (Kafka, Kinesis) keep an ordered log many consumers read.\n\n**CAP** — In a network partition choose consistency or availability; most cloud stores let you tune it.\n\n## Setup & commands\n\n### MySQL/MariaDB checks\n\n```\nSHOW PROCESSLIST;                       -- what is running\nSHOW ENGINE INNODB STATUS\\G            -- locks, deadlocks\nSELECT * FROM information_schema.innodb_trx;\nEXPLAIN SELECT * FROM orders WHERE customer_id = 42;\n-- slow query log\nSET GLOBAL slow_query_log = 1; SET GLOBAL long_query_time = 1;\n```\n\n### Backup and restore\n\n```\nmariadb-dump --single-transaction --routines --all-databases | gzip > all-$(date +%F).sql.gz\ngunzip < all-2026-11-21.sql.gz | mariadb\n# PostgreSQL\npg_dump -Fc -d app -f app.dump && pg_restore -d app_restore app.dump\n```\n\n### Redis essentials\n\n```\nredis-cli INFO stats | grep -E 'keyspace_(hits|misses)'\nredis-cli --bigkeys\nredis-cli CONFIG SET maxmemory-policy allkeys-lru\n```\n",
+   "diagram": ""
+  },
+  {
+   "slug": "monitoring",
+   "title": "Prometheus, Grafana, Loki & ELK",
+   "category": "Operate",
+   "intro": "The open-source monitoring stack you can run yourself: metrics with Prometheus, dashboards with Grafana, logs with Loki or Elasticsearch, alerts with Alertmanager.",
+   "body": "## Key concepts\n\n**Pull model** — Prometheus scrapes <code>/metrics</code> endpoints on a schedule; targets found by service discovery.\n\n**Metric types** — Counter (only goes up), gauge (up and down), histogram (buckets for latency percentiles), summary.\n\n**PromQL** — Query language: <code>rate()</code> over counters, <code>histogram_quantile()</code> for p95, aggregation <code>by (label)</code>.\n\n**Cardinality** — Each unique label combination is a series; user IDs as labels explode memory.\n\n**Alerting rules** — PromQL expression + <code>for</code> duration → Alertmanager groups, deduplicates, silences and routes.\n\n**Logs** — Loki indexes only labels (cheap); Elasticsearch indexes full text (powerful, heavier).\n\n## Setup & commands\n\n### Install kube-prometheus-stack\n\n```\nhelm repo add prometheus-community https://prometheus-community.github.io/helm-charts\nhelm install mon prometheus-community/kube-prometheus-stack -n monitoring --create-namespace\nkubectl -n monitoring port-forward svc/mon-grafana 3000:80\n```\n\n### PromQL you should know\n\n```\n# request rate per service\nsum by (service) (rate(http_requests_total[5m]))\n# error ratio\nsum(rate(http_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m]))\n# p95 latency\nhistogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))\n# pods restarting\nincrease(kube_pod_container_status_restarts_total[15m]) > 0\n# node memory used %\n1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes\n```\n\n### Alert rule\n\n```\ngroups:\n- name: web\n  rules:\n  - alert: HighErrorRate\n    expr: sum(rate(http_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m])) > 0.02\n    for: 5m\n    labels: { severity: page }\n    annotations:\n      summary: \"5xx above 2% for 5 minutes\"\n      runbook_url: https://wiki/runbooks/web-5xx\n```\n",
+   "diagram": "flowchart LR\n  APP[Apps /metrics] --> PROM[Prometheus<br/>scrape · store · rules]\n  NE[node-exporter] --> PROM\n  KSM[kube-state-metrics] --> PROM\n  PROM --> AM[Alertmanager] --> PD[PagerDuty / Slack]\n  PROM --> GRAF[Grafana]\n  PT[Promtail / Fluent Bit] --> LOKI[Loki] --> GRAF"
+  },
+  {
+   "slug": "sre",
+   "title": "Site reliability engineering",
+   "category": "Operate",
+   "intro": "Reliability as an engineering problem: measure what users feel, set targets, spend error budgets wisely and cut toil.",
+   "body": "## Key concepts\n\n**SLI** — A measured indicator of user experience: availability, latency, correctness of requests.\n\n**SLO** — Target for an SLI over a window, e.g. 99.9% of requests < 300 ms over 28 days.\n\n**Error budget** — 1 − SLO: the failure you may spend on releases and experiments; when gone, focus on reliability.\n\n**Burn rate** — How fast the budget is used; multi-window burn-rate alerts page early for fast burns, ticket slow burns.\n\n**Toil** — Manual, repetitive, automatable work that grows with scale; SRE caps it (e.g. 50%) and automates it away.\n\n**DORA metrics** — Deployment frequency, lead time for changes, change failure rate, time to restore service.\n\n**Nines** — 99.9% ≈ 43 min/month downtime, 99.95% ≈ 22 min, 99.99% ≈ 4.3 min.\n\n## Setup & commands\n\n### SLO and burn-rate alert (PromQL)\n\n```\n# SLI: share of good requests (non-5xx) over 30 days, SLO 99.9%\n# fast burn: 2% of a 30-day budget in 1 hour (burn rate 14.4)\n(\n  sum(rate(http_requests_total{status=~\"5..\"}[1h])) / sum(rate(http_requests_total[1h]))\n) > (14.4 * 0.001)\nand\n(\n  sum(rate(http_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m]))\n) > (14.4 * 0.001)\n```\n",
+   "diagram": ""
+  },
+  {
+   "slug": "iam",
+   "title": "Identity, access & secrets",
+   "category": "Secure",
+   "intro": "Who and what can do what, across clouds, clusters and pipelines: least privilege, short-lived credentials and no secrets in code.",
+   "body": "## Key concepts\n\n**Least privilege** — Grant the minimum actions on the minimum resources; review with access analyzers and last-used data.\n\n**SSO & MFA** — One identity provider for humans, MFA everywhere, no shared accounts, break-glass accounts locked away.\n\n**Roles over keys** — Humans and workloads assume roles and get temporary credentials; long-lived access keys are the most common leak.\n\n**Federation (OIDC/SAML)** — Trust an external identity (GitHub, Azure DevOps, Kubernetes) instead of copying secrets into it.\n\n**RBAC vs ABAC** — Role-based (by role) vs attribute-based (by tags such as team=payments).\n\n**Secrets lifecycle** — Create in a vault, access by identity, rotate automatically, audit every read, revoke fast.\n\n## Setup & commands\n\n### Least-privilege S3 policy\n\n```\n{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [{\n    \"Effect\": \"Allow\",\n    \"Action\": [\"s3:GetObject\", \"s3:PutObject\"],\n    \"Resource\": \"arn:aws:s3:::acme-uploads/app/*\"\n  }]\n}\n```\n\n### Find unused permissions\n\n```\naws iam generate-service-last-accessed-details --arn arn:aws:iam::123456789012:role/app\naws accessanalyzer list-findings --analyzer-arn <arn>\naws iam list-access-keys --user-name ci-legacy   # then delete old keys\n```\n",
+   "diagram": "flowchart LR\n  USER[Engineer] -->|SSO + MFA| IDP[Identity provider<br/>Entra ID / Okta]\n  IDP -->|SAML/OIDC| AWS[AWS IAM Identity Center]\n  IDP --> AZ[Azure RBAC]\n  CI[CI job] -->|OIDC token| STS[Cloud STS] --> ROLE[Short-lived role]\n  POD[Pod ServiceAccount] -->|IRSA / Workload Identity| ROLE\n  ROLE --> SM[(Secrets Manager / Key Vault)]"
+  },
+  {
+   "slug": "hadr",
+   "title": "High availability & disaster recovery",
+   "category": "Design",
+   "intro": "Keep the service up when parts fail, and get it back when a whole region or a bad change takes it down.",
+   "body": "## Key concepts\n\n**HA vs DR** — HA survives component/AZ failure automatically; DR recovers from losing a region or data (deleted, corrupted, ransomware).\n\n**RPO / RTO** — Recovery point objective (data you may lose) and recovery time objective (how long you may be down).\n\n**DR strategies** — Backup & restore (hours), pilot light (data replicated, minutes–hours), warm standby (minutes), multi-site active-active (near zero).\n\n**Failure domains** — Process → node → AZ → region → provider; design for the ones your SLO requires.\n\n**Backups** — 3-2-1 rule, immutable/locked copies, cross-account, regular restore tests.\n\n**Chaos engineering** — Inject failures on purpose (kill pods, AZ outage game days) to prove recovery works.\n\n## Setup & commands\n\n### DR runbook skeleton\n\n```\n1. Declare the incident and the DR decision owner\n2. Freeze deploys; confirm scope (region, data)\n3. Promote the DR database replica (note the RPO)\n4. Scale up the DR app tier (IaC / ASG / node groups)\n5. Switch DNS (Route 53 failover or weighted change)\n6. Verify key user journeys and SLOs\n7. Communicate; plan fail-back after the primary is healthy\n```\n",
+   "diagram": "flowchart LR\n  subgraph Primary region\n    A1[AZ a: app + DB primary]\n    A2[AZ b: app + DB standby]\n  end\n  subgraph DR region\n    B1[Warm standby: app scaled down<br/>DB replica]\n  end\n  R53[DNS health-check failover] --> A1 & A2\n  R53 -.on failure.-> B1\n  A1 -.async replication.-> B1"
+  },
+  {
+   "slug": "finops",
+   "title": "Cost optimisation & FinOps",
+   "category": "Design",
+   "intro": "Cloud spend is an engineering metric. Know where money goes and the levers that cut it without hurting reliability.",
+   "body": "## Key concepts\n\n**Visibility** — Tags/labels for team, service and env on everything; cost allocation reports and showback/chargeback.\n\n**Right-sizing** — Match instance and pod sizes to real usage (p95), not guesses.\n\n**Commitments** — Savings Plans / Reserved Instances / Azure Reservations for steady baseline load.\n\n**Spot / preemptible** — Up to ~70–90% cheaper for interruptible, stateless work; handle the 2-minute notice.\n\n**Storage tiers** — S3 lifecycle to IA/Glacier, delete old snapshots and unattached volumes.\n\n**Network costs** — NAT gateway and cross-AZ/region traffic add up; use VPC endpoints and keep chatty services in one AZ where safe.\n\n## Setup & commands\n\n### Find waste on AWS\n\n```\naws ec2 describe-volumes --filters Name=status,Values=available --query 'Volumes[].[VolumeId,Size]'\naws ec2 describe-addresses --query 'Addresses[?AssociationId==null].PublicIp'\naws ce get-cost-and-usage --time-period Start=2026-10-01,End=2026-11-01 \\\n  --granularity MONTHLY --metrics UnblendedCost --group-by Type=DIMENSION,Key=SERVICE\n```\n",
+   "diagram": ""
+  },
+  {
+   "slug": "aws-catalog",
+   "title": "AWS service catalogue",
+   "category": "Cloud",
+   "intro": "The AWS services you are most likely to meet, grouped by what they do, with the one-line purpose and the Azure and GCP equivalent.",
+   "body": "## Key concepts\n\n**Compute** — EC2 (VMs) · Auto Scaling · Lambda (functions) · ECS / EKS (containers) · Fargate (serverless containers) · Batch · Lightsail. <em>Azure:</em> VMs, VMSS, Functions, AKS, Container Apps. <em>GCP:</em> Compute Engine, MIGs, Cloud Functions, GKE, Cloud Run.\n\n**Networking** — VPC · Route 53 (DNS) · CloudFront (CDN) · ELB (ALB/NLB/GWLB) · API Gateway · Direct Connect · Transit Gateway · PrivateLink · Global Accelerator.\n\n**Storage** — S3 (objects) · EBS (block) · EFS (NFS) · FSx (Windows/Lustre/ONTAP) · S3 Glacier (archive) · Backup · Storage Gateway.\n\n**Databases** — RDS (MySQL, PostgreSQL, MariaDB, SQL Server, Oracle) · Aurora · DynamoDB · ElastiCache (Redis/Memcached) · DocumentDB · Neptune · Timestream · Redshift (warehouse).\n\n**Integration** — SQS (queues) · SNS (pub/sub) · EventBridge (event bus) · Step Functions (workflows) · Kinesis (streams) · MSK (Kafka) · MQ.\n\n**Containers & delivery** — ECR (registry) · CodeCommit · CodeBuild · CodeDeploy · CodePipeline · App Runner · Elastic Beanstalk · CloudFormation · CDK.\n\n**Security & identity** — IAM · IAM Identity Center · Organizations + SCPs · KMS · Secrets Manager · Certificate Manager · WAF · Shield · GuardDuty · Inspector · Macie · Security Hub · Detective · Firewall Manager.\n\n**Management & monitoring** — CloudWatch (metrics, logs, alarms) · CloudTrail (API audit) · Config (compliance) · Systems Manager (Session Manager, Patch Manager, Parameter Store) · Trusted Advisor · Control Tower · X-Ray (tracing).\n\n**Cost** — Cost Explorer · Budgets · Compute Optimizer · Savings Plans · Cost and Usage Report.\n\n**Analytics & AI** — Athena · Glue · EMR · OpenSearch · QuickSight · SageMaker · Bedrock.\n",
+   "diagram": ""
+  }
+ ],
+ "interview": [
+  {
+   "question": "A server is slow. What do you check first?",
+   "topic": "Linux administration",
+   "level": "Junior",
+   "answer": "<code>uptime</code> (load vs CPUs), <code>top</code> (which process, CPU vs iowait <code>wa</code>), <code>free -h</code> (swap use), <code>df -h</code>/<code>df -i</code> (full disk), <code>dmesg -T | tail</code> (OOM, disk errors), then the app's logs in <code>journalctl</code>. High <code>wa</code> means disk; high <code>st</code> on cloud means a noisy neighbour or exhausted burst credits."
+  },
+  {
+   "question": "What is the difference between a process and a thread?",
+   "topic": "Linux administration",
+   "level": "Junior",
+   "answer": "A process has its own memory space; threads share the memory of their process. Threads are cheaper to create and talk to each other directly, but one bad thread can corrupt the whole process."
+  },
+  {
+   "question": "The disk is 100% full but du shows much less used. Why?",
+   "topic": "Linux administration",
+   "level": "Mid",
+   "answer": "A deleted file is still held open by a process (often a log). Space is freed only when the process closes it. Find it with <code>lsof +L1</code> or <code>lsof | grep deleted</code>, then restart the process or truncate via <code>/proc/&lt;pid&gt;/fd/&lt;n&gt;</code>. Also check inodes with <code>df -i</code>."
+  },
+  {
+   "question": "Explain what happens when you type ls and press Enter.",
+   "topic": "Linux administration",
+   "level": "Mid",
+   "answer": "The shell parses the line, finds <code>ls</code> in <code>$PATH</code>, <code>fork()</code>s a child and the child <code>execve()</code>s the binary. The kernel loads it, the dynamic linker maps libraries, <code>ls</code> calls <code>getdents</code> to read the directory and writes to stdout (the terminal). The shell <code>wait()</code>s and shows the prompt."
+  },
+  {
+   "question": "How do you find which process listens on port 443?",
+   "topic": "Linux administration",
+   "level": "Mid",
+   "answer": "<code>sudo ss -ltnp | grep :443</code> (or <code>lsof -i :443</code>). <code>-l</code> listening, <code>-t</code> TCP, <code>-n</code> numeric, <code>-p</code> process."
+  },
+  {
+   "question": "A box keeps getting OOM-killed at night. How do you investigate?",
+   "topic": "Linux administration",
+   "level": "Senior",
+   "answer": "<code>dmesg -T | grep -i oom</code> / <code>journalctl -k</code> shows the victim and memory state. Correlate with cron jobs and backups at that hour, check memory trends (sar, Datadog), look for leaks (RSS growing), set per-service limits with systemd <code>MemoryMax=</code> or cgroups so one job cannot take the whole box, and add swap or memory if the workload really needs it."
+  },
+  {
+   "question": "What happens when you type a URL into the browser?",
+   "topic": "Networking, proxy & nginx",
+   "level": "Junior",
+   "answer": "DNS resolves the name (browser cache → OS → resolver → root → TLD → authoritative), TCP handshake to the IP, TLS handshake (certificate check, keys), HTTP request, then the edge (CDN/WAF/LB/nginx) routes to an app server, which may query a cache and database, and the response comes back. The browser parses HTML and fetches CSS/JS/images (often from the CDN)."
+  },
+  {
+   "question": "Users get intermittent 502s behind nginx. How do you debug?",
+   "topic": "Networking, proxy & nginx",
+   "level": "Mid",
+   "answer": "Read <code>error.log</code> for 'upstream prematurely closed' or 'connect() failed'. Correlate with app restarts and deploys (pods not ready, crash loops), check keep-alive: the app's idle timeout must be longer than nginx's, and gunicorn workers may be saturated or killed by OOM. Fix readiness, timeouts or worker counts and keep logging <code>$upstream_status</code> and <code>$upstream_response_time</code>."
+  },
+  {
+   "question": "How does nginx rate limiting work?",
+   "topic": "Networking, proxy & nginx",
+   "level": "Mid",
+   "answer": "<code>limit_req_zone</code> defines a leaky bucket per key (usually client IP) with a steady rate; <code>burst</code> allows a queue of extra requests and <code>nodelay</code> serves them at once. Beyond that, nginx returns 503 (or the <code>limit_req_status</code> you set, usually 429). Behind a CDN, key on the real client IP with <code>set_real_ip_from</code> + <code>real_ip_header</code>."
+  },
+  {
+   "question": "Explain forward proxy vs reverse proxy.",
+   "topic": "Networking, proxy & nginx",
+   "level": "Mid",
+   "answer": "A forward proxy acts for clients (corporate egress, filtering): the server sees the proxy. A reverse proxy acts for servers (nginx, ALB): clients only see the proxy, which hides, protects and balances the backends."
+  },
+  {
+   "question": "Design the network for a 3-tier app in a cloud VPC.",
+   "topic": "Networking, proxy & nginx",
+   "level": "Senior",
+   "answer": "VPC /16 across 3 AZs. Public subnets: load balancer and NAT gateways. Private app subnets: app servers or Kubernetes nodes. Private data subnets: databases, no internet route. Security groups chain by reference (LB → app on 8000, app → DB on 3306). VPC endpoints for S3/ECR/Secrets Manager to avoid NAT costs. Flow logs on, and WAF at the edge."
+  },
+  {
+   "question": "CMD vs ENTRYPOINT?",
+   "topic": "Docker & containers",
+   "level": "Junior",
+   "answer": "ENTRYPOINT is the fixed executable; CMD gives default arguments that <code>docker run</code> can override. Common pattern: ENTRYPOINT a small script, CMD the default mode (<code>web</code>)."
+  },
+  {
+   "question": "How do you make images smaller and safer?",
+   "topic": "Docker & containers",
+   "level": "Mid",
+   "answer": "Slim or distroless base pinned by digest, multi-stage builds, <code>.dockerignore</code>, combine apt commands and clean caches in the same layer, run as non-root, no secrets in layers (BuildKit <code>--secret</code>), scan in CI and rebuild regularly for patches."
+  },
+  {
+   "question": "A container exits immediately. How do you debug?",
+   "topic": "Docker & containers",
+   "level": "Mid",
+   "answer": "<code>docker ps -a</code> for the exit code, <code>docker logs</code>, <code>docker inspect</code> (OOMKilled, ExitCode 137 = killed, 1 = app error), run it interactively with <code>--entrypoint sh</code> to check files, env and config."
+  },
+  {
+   "question": "Containers vs VMs: when do you still pick VMs?",
+   "topic": "Docker & containers",
+   "level": "Senior",
+   "answer": "Containers share the host kernel: fast, dense, but weaker isolation. VMs give a separate kernel: stronger isolation for untrusted or multi-tenant workloads, different OSes, kernel-level tuning, licensed software. Many platforms run containers inside VMs (EKS nodes) or micro-VMs (Firecracker/Fargate) for both."
+  },
+  {
+   "question": "A pod is in CrashLoopBackOff. What do you do?",
+   "topic": "Kubernetes & EKS",
+   "level": "Junior",
+   "answer": "<code>kubectl describe pod</code> (exit code, events), <code>kubectl logs --previous</code> (why it died), check config/secrets/env, dependencies (DB reachable?), a too-strict liveness probe, and OOMKilled in the last state. Fix the cause; the back-off (10 s, 20 s, 40 s… 5 min) resets after it runs fine."
+  },
+  {
+   "question": "How do you achieve zero-downtime deployments?",
+   "topic": "Kubernetes & EKS",
+   "level": "Mid",
+   "answer": "Rolling update with <code>maxUnavailable: 0</code>, a real readiness probe, graceful shutdown (<code>preStop</code> sleep + app draining within <code>terminationGracePeriodSeconds</code>), 2+ replicas with a PodDisruptionBudget, and backward-compatible database migrations (expand → migrate → contract)."
+  },
+  {
+   "question": "Pods are Pending. Why?",
+   "topic": "Kubernetes & EKS",
+   "level": "Mid",
+   "answer": "<code>kubectl describe pod</code> shows the scheduler reason: insufficient CPU/memory for the requests, a ResourceQuota exceeded, node selectors/affinity/taints with no match, an unbound PersistentVolumeClaim, or too many pods per node (on EKS, ENI IP limits). Fix the request, add capacity (Karpenter/cluster autoscaler) or the toleration."
+  },
+  {
+   "question": "How does a Service find pods, and how does DNS fit in?",
+   "topic": "Kubernetes & EKS",
+   "level": "Mid",
+   "answer": "The Service selects pods by label; the EndpointSlice controller lists the ready pod IPs; kube-proxy programs iptables/IPVS so the ClusterIP forwards to them. CoreDNS answers <code>svc.namespace.svc.cluster.local</code> with the ClusterIP."
+  },
+  {
+   "question": "How do pods on EKS get AWS permissions safely?",
+   "topic": "Kubernetes & EKS",
+   "level": "Senior",
+   "answer": "IRSA or EKS Pod Identity: a ServiceAccount is annotated with (or associated to) an IAM role; the pod gets a projected token, and the AWS SDK exchanges it with STS for short-lived credentials. No node-wide instance role sharing, no static keys, least privilege per workload."
+  },
+  {
+   "question": "How do you upgrade an EKS cluster safely?",
+   "topic": "Kubernetes & EKS",
+   "level": "Senior",
+   "answer": "Read the release notes and deprecated APIs (<code>pluto</code>/<code>kubent</code>), upgrade the control plane one minor version, then add-ons (VPC CNI, CoreDNS, kube-proxy), then nodes (new node group or Karpenter drift) with PDBs protecting workloads. Do it in staging first, keep a rollback plan for the node groups."
+  },
+  {
+   "question": "What is the difference between a pipeline artifact and a container image?",
+   "topic": "CI/CD: Azure DevOps, Jenkins, GitHub Actions",
+   "level": "Junior",
+   "answer": "A pipeline artifact is any file a run publishes for later stages or download (test reports, zip). A container image is a specific artifact type stored in a registry and deployed as-is. Build once, promote the same artifact through environments."
+  },
+  {
+   "question": "How do you enforce quality on main in Azure Repos?",
+   "topic": "CI/CD: Azure DevOps, Jenkins, GitHub Actions",
+   "level": "Mid",
+   "answer": "Branch policies: require PRs, minimum reviewers (no self-approval), build validation pipeline, linked work items, resolved comments, code owners for paths. Combine with <code>extends</code> templates so every pipeline runs the mandatory security steps."
+  },
+  {
+   "question": "Blue/green vs canary?",
+   "topic": "CI/CD: Azure DevOps, Jenkins, GitHub Actions",
+   "level": "Mid",
+   "answer": "Blue/green runs a full new stack and switches all traffic at once: instant rollback, double cost. Canary sends a small share (1–10%) to the new version and widens it while SLOs hold: less risk, needs traffic splitting and good metrics."
+  },
+  {
+   "question": "Your pipeline takes 40 minutes. How do you speed it up?",
+   "topic": "CI/CD: Azure DevOps, Jenkins, GitHub Actions",
+   "level": "Mid",
+   "answer": "Cache dependencies and Docker layers, split and parallelise test jobs, run only affected tests, use a prebuilt base image, move slow scans off the critical path (nightly), use bigger or self-hosted agents near the registry, and fail fast with cheap checks first."
+  },
+  {
+   "question": "How do you design CI/CD for 50 microservices?",
+   "topic": "CI/CD: Azure DevOps, Jenkins, GitHub Actions",
+   "level": "Senior",
+   "answer": "Shared, versioned pipeline templates (one golden path), per-service pipelines triggered by path filters, artifact per service tagged by SHA, GitOps (Argo CD/Flux) for deploys with environment promotion by PR, policy as code for required checks, and DORA metrics (lead time, deploy frequency, change failure rate, MTTR) to measure it."
+  },
+  {
+   "question": "What is Terraform state and why lock it?",
+   "topic": "Infrastructure as Code: Terraform & Pulumi",
+   "level": "Junior",
+   "answer": "It records which real resources belong to which code blocks and their attributes; plans compare code with it. Locking prevents two applies from changing the same state at once and corrupting it. It can contain secrets, so encrypt and restrict it."
+  },
+  {
+   "question": "How do you manage dev, staging and prod?",
+   "topic": "Infrastructure as Code: Terraform & Pulumi",
+   "level": "Mid",
+   "answer": "Same modules, one root per environment (or workspaces for small setups) with its own state and variables, promoted through PRs. Pin module and provider versions; apply only from pipelines."
+  },
+  {
+   "question": "Someone changed a security group in the console. What happens next plan?",
+   "topic": "Infrastructure as Code: Terraform & Pulumi",
+   "level": "Mid",
+   "answer": "The plan shows drift and proposes to revert to the code. Decide: if the change was right, put it in code (or <code>import</code>); if not, apply to revert. Prevent it with read-only console roles and drift detection."
+  },
+  {
+   "question": "How do you refactor resources into a module without destroying them?",
+   "topic": "Infrastructure as Code: Terraform & Pulumi",
+   "level": "Senior",
+   "answer": "Use <code>moved {}</code> blocks (Terraform 1.1+) or <code>terraform state mv</code>, then confirm the plan shows no destroy/create. For cross-state moves, <code>import</code> into the new state and <code>state rm</code> from the old."
+  },
+  {
+   "question": "Terraform vs Pulumi vs CloudFormation?",
+   "topic": "Infrastructure as Code: Terraform & Pulumi",
+   "level": "Senior",
+   "answer": "Terraform/OpenTofu: HCL, largest ecosystem, multi-cloud. Pulumi: general-purpose languages and testing, same providers. CloudFormation/CDK: AWS-native, no state to run, AWS only. Choose by team skills and estate; standardise on one."
+  },
+  {
+   "question": "How do you handle errors in a Python script that runs from cron?",
+   "topic": "Python for automation",
+   "level": "Junior",
+   "answer": "Catch specific exceptions where you can add context or recover, log them with the logging module, and exit non-zero at the top level so the scheduler or pipeline marks the run as failed and alerts."
+  },
+  {
+   "question": "When should you retry, and when not?",
+   "topic": "Python for automation",
+   "level": "Mid",
+   "answer": "Retry transient failures (timeouts, connection resets, 429, 502/503/504) on idempotent operations, with exponential backoff and jitter and a cap. Do not retry 4xx client errors (bad input, auth) or non-idempotent writes without an idempotency key."
+  },
+  {
+   "question": "What is the difference between except Exception and bare except?",
+   "topic": "Python for automation",
+   "level": "Mid",
+   "answer": "Bare <code>except</code> also catches <code>KeyboardInterrupt</code> and <code>SystemExit</code>, so Ctrl+C and <code>sys.exit</code> stop working. Catch the narrowest exception you can handle."
+  },
+  {
+   "question": "How would you run a fleet-wide automation safely?",
+   "topic": "Python for automation",
+   "level": "Senior",
+   "answer": "Dry-run mode by default, small batches with a pause and health check between them, idempotent actions, concurrency limits, a stop condition on error rate, structured logs of every change, and a rollback path."
+  },
+  {
+   "question": "Security group vs NACL?",
+   "topic": "AWS",
+   "level": "Junior",
+   "answer": "Security groups are stateful, attached to instances/ENIs, allow-only. NACLs are stateless, attached to subnets, have allow and deny rules evaluated in order, and need return-port rules."
+  },
+  {
+   "question": "How do you give an application on EC2 or EKS access to S3 without keys?",
+   "topic": "AWS",
+   "level": "Mid",
+   "answer": "EC2: an instance profile (IAM role). EKS: IRSA or Pod Identity per ServiceAccount. The SDK picks up short-lived credentials automatically; scope the policy to the bucket and prefix."
+  },
+  {
+   "question": "How do you reduce a high AWS bill?",
+   "topic": "AWS",
+   "level": "Mid",
+   "answer": "Cost Explorer by service and tag, right-size from CloudWatch/Compute Optimizer, Savings Plans for steady load, Spot for stateless work, delete idle resources (unattached EBS, old snapshots, idle load balancers), S3 lifecycle to cheaper tiers, VPC endpoints instead of NAT for S3/ECR traffic, and per-team budgets with alerts."
+  },
+  {
+   "question": "RPO and RTO for a regional failure: how do you design for them?",
+   "topic": "AWS",
+   "level": "Senior",
+   "answer": "Define them per service. Backup and restore (hours), pilot light (core data replicated, minutes to scale up), warm standby (scaled-down copy running), or active-active (near zero). Use cross-region replication (Aurora Global, S3 CRR, DynamoDB global tables), IaC to rebuild, Route 53 health-check failover, and practise the failover."
+  },
+  {
+   "question": "Service principal with a secret vs managed identity vs workload identity federation?",
+   "topic": "Azure",
+   "level": "Mid",
+   "answer": "A client secret must be stored and rotated and can leak. A managed identity is tied to an Azure resource, with no secret. Workload identity federation lets an external workload (Azure DevOps, GitHub, Kubernetes) exchange its own OIDC token for an Entra token: no secret anywhere. Prefer federation and managed identities."
+  },
+  {
+   "question": "How do you secure Key Vault?",
+   "topic": "Azure",
+   "level": "Mid",
+   "answer": "RBAC authorisation with least-privilege roles, private endpoint and firewall, soft delete and purge protection, diagnostic logs to Log Analytics, rotation policies, and separate vaults per environment."
+  },
+  {
+   "question": "Map AWS to Azure for a web platform.",
+   "topic": "Azure",
+   "level": "Mid",
+   "answer": "EKS→AKS, ECR→ACR, ALB→Application Gateway, CloudFront→Front Door, RDS→Azure Database for MySQL/PostgreSQL, ElastiCache→Azure Cache for Redis, Secrets Manager→Key Vault, IAM roles→managed identities + RBAC, CloudWatch→Azure Monitor."
+  },
+  {
+   "question": "What would you put on Cloudflare in front of a web app?",
+   "topic": "Cloudflare: DNS, WAF, CDN, Zero Trust",
+   "level": "Mid",
+   "answer": "Proxied DNS, Full (strict) TLS with an origin certificate, cache rules for static assets, managed WAF + custom rules for login and admin paths, rate limiting, bot protection, and Access + Tunnel for internal tools. Firewall the origin to Cloudflare IPs only."
+  },
+  {
+   "question": "Users see stale CSS after a deploy. Why and how to fix?",
+   "topic": "Cloudflare: DNS, WAF, CDN, Zero Trust",
+   "level": "Mid",
+   "answer": "The CDN cached the old file under the same URL. Use content-hashed file names (immutable caching), or purge the cache in the deploy pipeline via the Cloudflare API."
+  },
+  {
+   "question": "Zero Trust vs VPN?",
+   "topic": "Cloudflare: DNS, WAF, CDN, Zero Trust",
+   "level": "Senior",
+   "answer": "A VPN puts users on the network and trusts them broadly. Zero Trust checks identity, device and context on every request, per application, with least privilege and full logs, and the apps never need public exposure."
+  },
+  {
+   "question": "How do you correlate a latency spike across metrics, logs and traces in Datadog?",
+   "topic": "Observability: Datadog, metrics, logs, traces",
+   "level": "Mid",
+   "answer": "Start on the service dashboard (RED), open APM for that time window, pick slow traces and see which span is slow (DB, external call), jump to the logs of that trace via the injected trace ID, then to the host/container metrics for the same pod. Unified tags make each jump one click."
+  },
+  {
+   "question": "How do you keep log costs under control?",
+   "topic": "Observability: Datadog, metrics, logs, traces",
+   "level": "Mid",
+   "answer": "Index only what you search (exclusion filters, sampling of debug/info), generate metrics from logs for trends, archive everything to cheap storage with rehydration, set retention per index, and drop noisy health-check logs at the agent."
+  },
+  {
+   "question": "What makes a good alert?",
+   "topic": "Observability: Datadog, metrics, logs, traces",
+   "level": "Mid",
+   "answer": "It fires on user-visible symptoms (error rate, latency, SLO burn), is actionable, has a runbook link and owner, uses a duration to avoid flapping, and routes by severity: page for urgent, ticket for slow burn."
+  },
+  {
+   "question": "Design observability for 30 services on Kubernetes.",
+   "topic": "Observability: Datadog, metrics, logs, traces",
+   "level": "Senior",
+   "answer": "Agent as DaemonSet + cluster agent, auto-instrumented APM, unified tagging enforced in the Helm chart, structured JSON logs, per-service SLOs with burn-rate monitors to PagerDuty, shared dashboards per team, synthetic tests for key journeys, and monitors managed as code."
+  },
+  {
+   "question": "You are paged at 3 a.m.: error rate is 20%. Walk through it.",
+   "topic": "On-call & incident response: PagerDuty",
+   "level": "Mid",
+   "answer": "Acknowledge, open the channel, check the dashboard for scope and start time, look at what changed (deploys, config, infra events). Mitigate first: roll back the last deploy or scale out, before root-causing. Communicate on a fixed cadence. When stable, verify, hand over notes, and schedule the blameless postmortem."
+  },
+  {
+   "question": "How do you reduce alert fatigue?",
+   "topic": "On-call & incident response: PagerDuty",
+   "level": "Mid",
+   "answer": "Delete or tune alerts nobody acts on, alert on symptoms not causes, add durations and deduplication, group related alerts, move non-urgent alerts to low urgency/tickets, and review paging stats every week."
+  },
+  {
+   "question": "What goes into a good postmortem?",
+   "topic": "On-call & incident response: PagerDuty",
+   "level": "Senior",
+   "answer": "Summary and impact (users, duration, SLO budget used), a timeline with detection and response times, root cause and contributing factors (5 whys, no blame), what went well and badly, and concrete action items with owners and due dates, tracked to completion."
+  },
+  {
+   "question": "What security checks belong in a CI/CD pipeline?",
+   "topic": "DevSecOps & CI/CD security",
+   "level": "Mid",
+   "answer": "Secret scanning, SAST, dependency (SCA) and IaC scans on every PR; image scan, SBOM and signing at build; admission policies at deploy; DAST against staging; continuous re-scanning of running images. Gate on severity with a fix available, and track exceptions with an expiry date."
+  },
+  {
+   "question": "How do pipelines get secrets safely?",
+   "topic": "DevSecOps & CI/CD security",
+   "level": "Mid",
+   "answer": "From a vault (Key Vault, Secrets Manager) through an identity, ideally workload identity federation / OIDC, not stored credentials. Scope access per pipeline and environment, mask values, pass them as environment variables to the single step that needs them, and rotate centrally."
+  },
+  {
+   "question": "A developer committed an AWS key to GitHub. What do you do?",
+   "topic": "DevSecOps & CI/CD security",
+   "level": "Mid",
+   "answer": "Revoke/deactivate the key immediately (it is compromised the moment it is public), check CloudTrail for its use, rotate anything it could reach, remove it from history (git filter-repo) and force-push, add gitleaks pre-commit and push protection, and switch that workflow to OIDC."
+  },
+  {
+   "question": "How do you secure Azure DevOps service connections?",
+   "topic": "DevSecOps & CI/CD security",
+   "level": "Senior",
+   "answer": "Use workload identity federation, scope to a resource group, disable 'grant access to all pipelines', add approvals and checks (required template, branch control), separate connections per environment, and audit usage."
+  },
+  {
+   "question": "Explain software supply-chain security.",
+   "topic": "DevSecOps & CI/CD security",
+   "level": "Senior",
+   "answer": "Know and prove what you ship: hermetic builds on trusted runners, SBOMs, signed images and provenance attestations (SLSA), dependencies pinned by version/digest, admission that verifies signatures, and fast impact analysis on a new CVE through the SBOMs."
+  },
+  {
+   "question": "Describe your patch management process.",
+   "topic": "Patch management & vulnerability compliance",
+   "level": "Mid",
+   "answer": "Inventory all assets, scan weekly, prioritise by severity + exploitability (EPSS, KEV) + exposure, test in a pilot ring, deploy in waves inside maintenance windows with automatic reboots where allowed, verify with a re-scan, report compliance per team, and keep an emergency path for actively exploited CVEs (24–72 h)."
+  },
+  {
+   "question": "A patch broke production. What now?",
+   "topic": "Patch management & vulnerability compliance",
+   "level": "Mid",
+   "answer": "Stop the rollout (halt remaining waves), roll back affected systems (snapshot, package downgrade, previous image), confirm service health, open an incident, find the cause in the pilot results, and adjust testing or exclusions before resuming."
+  },
+  {
+   "question": "How do you prioritise 2,000 open vulnerabilities?",
+   "topic": "Patch management & vulnerability compliance",
+   "level": "Senior",
+   "answer": "Filter to what is reachable and exploitable: internet-facing assets, KEV and high-EPSS CVEs first, then critical CVSS with a fix available, grouped by fix (one base-image update can close hundreds). Track SLAs per severity and report trend, not just counts."
+  },
+  {
+   "question": "Design a highly available web application on AWS or Azure.",
+   "topic": "Solution architecture",
+   "level": "Mid",
+   "answer": "Edge: DNS + CDN + WAF. Load balancer across 3 AZs. Stateless app tier on Kubernetes or VM scale sets with autoscaling. Managed database Multi-AZ with backups and PITR, cache tier, object storage for files, queue + workers for slow jobs. Private networking, identities instead of keys, observability with SLOs and on-call, IaC for everything, and a tested DR plan with defined RPO/RTO."
+  },
+  {
+   "question": "How do you balance availability, security and performance?",
+   "topic": "Solution architecture",
+   "level": "Senior",
+   "answer": "Set targets first (SLOs, threat model, latency budget). Many controls help all three (CDN + WAF offloads and protects; caching speeds and shields the DB). Where they conflict (extra auth hops, encryption overhead, multi-region consistency) decide per service with data, document the trade-off in an ADR, and revisit with metrics."
+  },
+  {
+   "question": "Walk me through a high-level architecture you built.",
+   "topic": "Solution architecture",
+   "level": "Senior",
+   "answer": "Use a structure: business goal and constraints → high-level diagram (edge, compute, data, async, observability) → key decisions and why (with alternatives rejected) → how it scales and fails over → security model → cost → what you would change now. Bring numbers: traffic, latency, availability achieved, incidents and what you learned."
+  },
+  {
+   "question": "Monolith or microservices?",
+   "topic": "Solution architecture",
+   "level": "Senior",
+   "answer": "Start with a modular monolith unless teams, scale or deployment independence demand splitting. Microservices add network failure modes, distributed data and operational overhead; adopt them for clear domain boundaries with separate scaling or release needs, with platform support (CI/CD templates, observability, service discovery) in place first."
+  },
+  {
+   "question": "What does set -euo pipefail do?",
+   "topic": "Bash scripting",
+   "level": "Junior",
+   "answer": "<code>-e</code> exits when a command fails, <code>-u</code> treats unset variables as errors, <code>-o pipefail</code> makes a pipeline fail if any command in it fails (not just the last). Together they stop scripts from carrying on in a broken state."
+  },
+  {
+   "question": "How do you make a script idempotent?",
+   "topic": "Bash scripting",
+   "level": "Mid",
+   "answer": "Check before acting (<code>id user || useradd user</code>, <code>mkdir -p</code>, <code>grep -q line file || echo line &gt;&gt; file</code>), use tools that converge state (Ansible, Terraform) for anything bigger, and make re-runs safe after a partial failure."
+  },
+  {
+   "question": "git merge vs git rebase?",
+   "topic": "Git & branching strategies",
+   "level": "Junior",
+   "answer": "Merge joins branches with a merge commit and keeps true history; rebase moves your commits on top of the target for a linear history. Rebase your own feature branch before a PR; never rebase commits others already pulled."
+  },
+  {
+   "question": "Which branching strategy for continuous delivery, and why?",
+   "topic": "Git & branching strategies",
+   "level": "Mid",
+   "answer": "Trunk-based: small PRs merged to main at least daily, feature flags for unfinished work, main always releasable. Fewer merge conflicts, faster feedback, simpler pipelines than long-lived GitFlow branches."
+  },
+  {
+   "question": "How do you undo a bad commit already on main?",
+   "topic": "Git & branching strategies",
+   "level": "Mid",
+   "answer": "<code>git revert &lt;sha&gt;</code> creates a new commit that undoes it, keeping history intact for everyone. Do not <code>reset</code> and force-push a shared branch."
+  },
+  {
+   "question": "What is GitOps and why use it?",
+   "topic": "Helm & GitOps with Argo CD",
+   "level": "Mid",
+   "answer": "Git holds the desired state of every environment; an agent (Argo CD, Flux) in the cluster pulls and applies it and reverts drift. Benefits: audit trail and rollback through Git history, PR-based promotion, no cluster credentials in CI, self-healing."
+  },
+  {
+   "question": "How do you handle secrets in GitOps?",
+   "topic": "Helm & GitOps with Argo CD",
+   "level": "Mid",
+   "answer": "Never plain in Git. Use External Secrets Operator (pulls from Vault/Secrets Manager/Key Vault), Sealed Secrets, or SOPS-encrypted files decrypted in the cluster."
+  },
+  {
+   "question": "Ansible vs Terraform?",
+   "topic": "Configuration management with Ansible",
+   "level": "Mid",
+   "answer": "Terraform provisions infrastructure (create the VPC, VMs, databases) and tracks state. Ansible configures what runs on machines (packages, files, services) over SSH without state. They are often used together: Terraform creates, Ansible configures, or images are baked with Packer."
+  },
+  {
+   "question": "How do you patch 200 servers with no downtime?",
+   "topic": "Configuration management with Ansible",
+   "level": "Mid",
+   "answer": "Rolling play with <code>serial</code> (batches), take each host out of the load balancer, patch, reboot if needed, health-check, put it back; stop on failure with <code>max_fail_percentage</code>."
+  },
+  {
+   "question": "Map AWS core services to GCP.",
+   "topic": "Google Cloud (GCP)",
+   "level": "Mid",
+   "answer": "EC2→Compute Engine, ASG→Managed Instance Groups, EKS→GKE, Fargate/App Runner→Cloud Run, Lambda→Cloud Functions, S3→Cloud Storage, RDS→Cloud SQL, DynamoDB→Firestore/Bigtable, ElastiCache→Memorystore, IAM roles→service accounts, CloudWatch→Cloud Monitoring/Logging, ECR→Artifact Registry."
+  },
+  {
+   "question": "When is serverless a bad fit?",
+   "topic": "Serverless & event-driven",
+   "level": "Mid",
+   "answer": "Long-running or steady high-throughput workloads (cheaper on containers/VMs), very latency-sensitive paths hurt by cold starts, heavy local state, or needs beyond run-time/memory limits. Also when vendor lock-in is a concern."
+  },
+  {
+   "question": "How do you make an event consumer safe against duplicates?",
+   "topic": "Serverless & event-driven",
+   "level": "Mid",
+   "answer": "Make it idempotent: use an idempotency key (event ID) stored with a conditional write, or make the operation naturally idempotent (upsert). Configure retries with backoff and a dead-letter queue."
+  },
+  {
+   "question": "The database is slow. How do you find out why?",
+   "topic": "Databases, caching & messaging",
+   "level": "Mid",
+   "answer": "Check active queries and locks, the slow query log and top queries by total time, missing indexes (<code>EXPLAIN</code>), connection count vs max, CPU/IOPS/memory (buffer pool hit rate), replication lag, and recent changes (deploys, data growth). Fix the worst query first."
+  },
+  {
+   "question": "SQS vs Kafka?",
+   "topic": "Databases, caching & messaging",
+   "level": "Mid",
+   "answer": "SQS: managed queue, each message processed by one consumer then deleted, simple scaling, no ordering across the queue (FIFO queues exist). Kafka: ordered, retained log per partition, many consumer groups replay independently, high throughput, more to operate (MSK helps)."
+  },
+  {
+   "question": "How do you run a schema migration with no downtime?",
+   "topic": "Databases, caching & messaging",
+   "level": "Senior",
+   "answer": "Expand and contract: add new columns/tables compatible with old code, deploy code that writes both and reads new, backfill in batches, switch reads, then remove the old column in a later release. Avoid long locks (online DDL tools like gh-ost/pt-osc for big tables)."
+  },
+  {
+   "question": "Why use rate() on a counter?",
+   "topic": "Prometheus, Grafana, Loki & ELK",
+   "level": "Mid",
+   "answer": "Counters only increase and reset on restart; <code>rate()</code> gives the per-second increase over a window and handles resets, which is what you graph and alert on."
+  },
+  {
+   "question": "Prometheus vs Datadog?",
+   "topic": "Prometheus, Grafana, Loki & ELK",
+   "level": "Mid",
+   "answer": "Prometheus: open source, self-hosted, pull-based, PromQL, you run storage and HA (Thanos/Mimir for scale). Datadog: SaaS with metrics, logs, APM, RUM and security in one place, less to operate, priced per host and volume. Many teams use Prometheus metrics and ship them to a SaaS."
+  },
+  {
+   "question": "SLI vs SLO vs SLA?",
+   "topic": "Site reliability engineering",
+   "level": "Mid",
+   "answer": "SLI is the measurement, SLO the internal target, SLA the contractual promise with penalties (set looser than the SLO so you notice before you breach it)."
+  },
+  {
+   "question": "How do you introduce SLOs in a team that has none?",
+   "topic": "Site reliability engineering",
+   "level": "Senior",
+   "answer": "Pick 1–3 critical user journeys, define SLIs from data you already have (load balancer logs), set an SLO slightly below current performance, add burn-rate alerts replacing noisy cause-based alerts, review the error budget weekly, and agree on what happens when it runs out."
+  },
+  {
+   "question": "How do you remove long-lived cloud keys from CI/CD?",
+   "topic": "Identity, access & secrets",
+   "level": "Mid",
+   "answer": "Switch every pipeline to OIDC federation (GitHub Actions, Azure DevOps workload identity, GitLab), create one narrowly scoped role per pipeline/environment with trust conditions on repo and branch, delete the old keys, and block key creation with an SCP or policy."
+  },
+  {
+   "question": "Design access for 100 engineers across 20 AWS accounts.",
+   "topic": "Identity, access & secrets",
+   "level": "Senior",
+   "answer": "AWS Organizations with OUs per environment, IAM Identity Center federated to the company IdP, permission sets per job function (read-only, developer, admin with approval), SCP guardrails, no IAM users, break-glass accounts with alerts, and quarterly access reviews."
+  },
+  {
+   "question": "RPO vs RTO with an example?",
+   "topic": "High availability & disaster recovery",
+   "level": "Mid",
+   "answer": "RPO 15 minutes means you may lose up to 15 minutes of data (replicate/back up at least that often). RTO 1 hour means service must be back within an hour (needs automation and a ready environment)."
+  },
+  {
+   "question": "How do you prove your DR plan works?",
+   "topic": "High availability & disaster recovery",
+   "level": "Senior",
+   "answer": "Run regular game days: restore backups into a clean account, fail over to the DR region with real traffic or a shadow, time each step against RTO/RPO, fix gaps, and keep the runbook and IaC in sync."
+  },
+  {
+   "question": "Our cloud bill jumped 40% this month. What do you do?",
+   "topic": "Cost optimisation & FinOps",
+   "level": "Mid",
+   "answer": "Break the bill down by service, account and tag for the jump; check new resources and data transfer (NAT, cross-region), autoscaling that never scaled down, forgotten test environments, log ingestion spikes. Fix the cause, then add budgets and anomaly alerts per team."
+  },
+  {
+   "question": "S3 vs EBS vs EFS?",
+   "topic": "AWS service catalogue",
+   "level": "Junior",
+   "answer": "S3: object storage over HTTP, unlimited, for files, backups, static sites. EBS: block disk attached to one EC2 instance in one AZ (boot and database volumes). EFS: shared NFS file system mounted by many instances across AZs."
+  },
+  {
+   "question": "SQS vs SNS vs EventBridge?",
+   "topic": "AWS service catalogue",
+   "level": "Mid",
+   "answer": "SQS: a queue, one consumer per message, buffering and retries. SNS: pub/sub fan-out to many subscribers (SQS, Lambda, email). EventBridge: event bus with content-based routing rules, SaaS and AWS service events, schedules."
+  },
+  {
+   "question": "A pod in production is deleted by mistake. What happens, and how long is the service affected?",
+   "topic": "Kubernetes",
+   "level": "Junior",
+   "answer": "The pod belongs to a **ReplicaSet** owned by a **Deployment**. The ReplicaSet controller sees `ready < desired` and creates a replacement at once. The **Service** only routes to *ready* pods, so with 2+ replicas users see no errors; the new pod takes traffic once its readiness probe passes.\n\n```bash\nkubectl -n taskflow-prod delete pod <pod>\nkubectl -n taskflow-prod get pods -w\nkubectl -n taskflow-prod get events --sort-by=.lastTimestamp | tail\n```\nWith **one** replica you get a gap until the new pod is ready: that is why production runs 2+ replicas plus a PodDisruptionBudget."
+  },
+  {
+   "question": "How do you deploy a new version with zero downtime on Kubernetes?",
+   "topic": "Kubernetes",
+   "level": "Mid",
+   "answer": "1. **Rolling update** with `maxUnavailable: 0` and `maxSurge: 1`: a new pod must be up before an old one stops.\n2. A **readiness probe** on a real endpoint (here `/api/method/ping`), so traffic reaches only pods that can serve.\n3. **Graceful shutdown**: `terminationGracePeriodSeconds` + the app finishing in-flight requests (gunicorn `--graceful-timeout`).\n4. **2+ replicas** and a **PodDisruptionBudget** (`minAvailable: 1`).\n5. Backward-compatible DB migrations (expand → migrate → contract).\n\n```bash\nkubectl -n taskflow-prod rollout restart deploy/taskflow-web\nkubectl -n taskflow-prod rollout status deploy/taskflow-web\n```"
+  },
+  {
+   "question": "A deploy pushed an image tag that does not exist. What do users see, and how do you recover?",
+   "topic": "Kubernetes",
+   "level": "Mid",
+   "answer": "Nothing, if the rollout is safe: the new pod is stuck in `ErrImagePull` / `ImagePullBackOff`, never becomes ready, and with `maxUnavailable: 0` the old pods keep serving. The rollout simply stalls (`progressDeadlineSeconds` marks it failed).\n\n```bash\nkubectl -n taskflow-prod rollout status deploy/taskflow-web     # waits / times out\nkubectl -n taskflow-prod describe pod <new-pod>                 # Failed to pull image\nkubectl -n taskflow-prod rollout undo deploy/taskflow-web       # or: helm rollback taskflow\n```\nPrevent it: tag images by **git SHA**, push before deploy, and make the pipeline fail when `rollout status` fails."
+  },
+  {
+   "question": "What does OOMKilled mean and how do you fix it?",
+   "topic": "Kubernetes",
+   "level": "Junior",
+   "answer": "The container used more memory than its **limit**; the kernel's OOM killer ended it (exit code **137**). Kubernetes restarts it per `restartPolicy` and shows `Last State: Terminated, Reason: OOMKilled`.\n\nFix: find the real usage (`kubectl top pod`, metrics over time), then either **raise the limit** or **use less memory** (fewer gunicorn workers, smaller caches, stream large files). Keep request ≈ normal usage and limit ≈ peak.\n\n```bash\nkubectl -n taskflow-prod describe pod <pod> | grep -A3 \"Last State\"\nkubectl -n taskflow-prod top pod\n```"
+  },
+  {
+   "question": "A pod is in CrashLoopBackOff. How do you debug it?",
+   "topic": "Kubernetes",
+   "level": "Junior",
+   "answer": "The container starts, exits, and is restarted with growing back-off (10s, 20s, 40s… up to 5 min).\n\n```bash\nkubectl describe pod <pod>              # events, exit code, last state\nkubectl logs <pod> --previous           # logs of the crashed run\nkubectl get pod <pod> -o yaml | grep -A5 lastState\n```\nCommon causes: bad config/env/secret, missing DB, wrong command, failing liveness probe, OOM. Fix the cause; if you need a shell, override the command with `sleep infinity` in a debug copy (`kubectl debug`)."
+  },
+  {
+   "question": "How does one pod find another service in the cluster?",
+   "topic": "Kubernetes",
+   "level": "Junior",
+   "answer": "Through a **Service** and cluster **DNS** (CoreDNS). `taskflow-web.taskflow-prod.svc.cluster.local` resolves to the Service's stable **ClusterIP**; kube-proxy (iptables/IPVS) load-balances to the ready pod IPs behind it. Pods come and go; the name and IP stay.\n\n```bash\nkubectl run -it --rm dns --image=busybox:1.36 -- nslookup taskflow-web.taskflow-prod.svc.cluster.local\nkubectl -n taskflow-prod get svc,endpoints taskflow-web\n```"
+  },
+  {
+   "question": "How does the Horizontal Pod Autoscaler decide how many pods to run?",
+   "topic": "Kubernetes",
+   "level": "Mid",
+   "answer": "Every 15 s: `desired = ceil(current × currentCPU / targetCPU)`, where CPU is average usage as a % of the **request**, read from **metrics-server**. It stays between min and max; scale-down waits 5 minutes (stabilisation window) to avoid flapping.\n\nGotchas: no CPU request → no HPA; a too-high request → never scales; scale-up takes ~30–60 s plus pod start time, so keep headroom.\n\n```bash\nkubectl -n taskflow-prod get hpa -w\nkubectl -n taskflow-prod describe hpa taskflow-web\n```"
+  },
+  {
+   "question": "Requests vs limits: how do you size them, and what QoS class do you want?",
+   "topic": "Kubernetes",
+   "level": "Senior",
+   "answer": "**Request** = what the scheduler reserves (and what HPA % is measured against). **Limit** = hard cap: CPU over it is **throttled**, memory over it is **OOMKilled**.\n\n- *Guaranteed* (request = limit for CPU and memory): most predictable, least likely to be evicted.\n- *Burstable* (request < limit): good density for web pods.\n- *BestEffort*: never for production.\n\nSize from data: run a load test, take p95 usage as the request and peak + margin as the memory limit. On shared nodes, quotas (ResourceQuota/LimitRange) stop one team from starving others."
+  },
+  {
+   "question": "Walk through what happens from `kubectl apply` of a Deployment to a running pod.",
+   "topic": "Kubernetes",
+   "level": "Senior",
+   "answer": "1. kubectl → **API server** (authn, authz/RBAC, admission webhooks, validation) → stored in **etcd**.\n2. **Deployment controller** creates/updates a **ReplicaSet**; ReplicaSet controller creates **Pod** objects.\n3. **Scheduler** picks a node (requests, affinity, taints) and binds the pod.\n4. **kubelet** on that node pulls the image via the **container runtime** (containerd), sets up networking through the **CNI** (flannel here), mounts volumes.\n5. Probes run; when readiness passes, the endpoint is added to the **Service** (EndpointSlice) and kube-proxy routes traffic."
+  },
+  {
+   "question": "What is a PodDisruptionBudget and when does it matter?",
+   "topic": "Kubernetes",
+   "level": "Mid",
+   "answer": "It limits **voluntary** disruptions (node drain, cluster upgrade, autoscaler scale-down): e.g. `minAvailable: 1` means a drain waits instead of evicting the last web pod. It does not protect against crashes or node failure.\n\n```bash\nkubectl -n taskflow-prod get pdb\nkubectl drain <node> --ignore-daemonsets --delete-emptydir-data\n```"
+  },
+  {
+   "question": "How would you run this platform on AWS EKS? Describe the architecture.",
+   "topic": "AWS",
+   "level": "Mid",
+   "answer": "- **VPC** across 3 AZs: public subnets (ALB, NAT GW), private subnets (nodes, RDS, ElastiCache).\n- **EKS** with managed node groups (or Karpenter) in private subnets; **IRSA/Pod Identity** for AWS access per ServiceAccount.\n- **AWS Load Balancer Controller** → ALB (or NLB + nginx ingress at the edge); **ACM** certificates; **Route 53** DNS; optional **CloudFront + WAF**.\n- **RDS for MariaDB/MySQL** Multi-AZ, **ElastiCache Redis**, **EFS** or S3 for files.\n- **ECR** for images with scan on push; **Secrets Manager** + External Secrets Operator.\n- Observability: CloudWatch Container Insights or Datadog agent DaemonSet; alerts to PagerDuty.\n- IaC: Terraform/Pulumi modules per layer (network, cluster, data, apps); GitOps (Argo CD) or pipeline Helm deploys.\n\nThis repo's Helm chart deploys unchanged on EKS; only storage class, ingress and DB host change."
+  },
+  {
+   "question": "How do GitHub Actions or Azure DevOps deploy to AWS without storing access keys?",
+   "topic": "AWS",
+   "level": "Mid",
+   "answer": "**OIDC federation.** The CI provider issues a short-lived signed JWT for each run. AWS IAM trusts that issuer (an *OIDC identity provider*) and a role's trust policy checks the claims (`repo:Satya8848/taskflow-launchpad:ref:refs/heads/main`). The job calls `sts:AssumeRoleWithWebIdentity` and gets 1-hour credentials. Nothing long-lived is stored.\n\n```yaml\npermissions: { id-token: write, contents: read }\nsteps:\n  - uses: aws-actions/configure-aws-credentials@v4\n    with: { role-to-assume: arn:aws:iam::<acct>:role/gha-deploy, aws-region: us-east-2 }\n```\nLeast privilege on the role; restrict `sub` to the branch/environment."
+  },
+  {
+   "question": "Security group vs NACL?",
+   "topic": "AWS",
+   "level": "Junior",
+   "answer": "**Security group**: stateful, attached to ENIs (instances, pods with SG-for-pods), allow-rules only; return traffic is automatic. **NACL**: stateless, per subnet, allow and deny rules, evaluated in order; you must allow return ephemeral ports. Use SGs for app rules, NACLs for coarse subnet blocks.\n\nHere: `launch-wizard-6` allows 22/80/443; k3s NodePorts stay closed because only host nginx (127.0.0.1) reaches them."
+  },
+  {
+   "question": "Our EC2 is a t2.large. Why can a load test slow down unrelated sites on it?",
+   "topic": "AWS",
+   "level": "Mid",
+   "answer": "t2/t3 are **burstable**: they earn CPU credits at a baseline (30% per vCPU on t2.large) and spend them above it. A long CPU-heavy test drains the balance; at zero the instance is throttled to baseline and *everything* on it slows. Fix: cap and shorten tests, watch `CPUCreditBalance` in CloudWatch, use T3 *unlimited* or a compute-optimised instance, or isolate test traffic.\n\nThis project enforces it: quotas, one heavy operation at a time, and a live-site guard that aborts tests."
+  },
+  {
+   "question": "Design a highly available, cost-aware architecture for a web app on AWS.",
+   "topic": "AWS",
+   "level": "Senior",
+   "answer": "- **Multi-AZ** everywhere: ALB across 3 AZs, ASG/EKS nodes in ≥2 AZs, RDS Multi-AZ.\n- **Stateless app tier**; state in RDS/ElastiCache/S3.\n- **Scale**: HPA + Karpenter (EKS) or target-tracking ASG; Spot for stateless workers with on-demand base.\n- **Edge**: CloudFront + WAF (or Cloudflare), ACM TLS, Route 53 health checks / failover.\n- **DR**: backups + PITR, cross-region snapshot copy; define RPO/RTO and test restores.\n- **Cost**: Savings Plans for baseline, Spot for burst, right-size from metrics, S3 lifecycle, NAT GW per AZ only where needed.\n- **Security**: private subnets, IAM least privilege, KMS everywhere, GuardDuty, Security Hub, Config rules."
+  },
+  {
+   "question": "Explain a multi-stage YAML pipeline in Azure DevOps with approvals.",
+   "topic": "Azure DevOps",
+   "level": "Mid",
+   "answer": "```yaml\ntrigger: { branches: { include: [main] } }\nstages:\n- stage: Build\n  jobs:\n  - job: build\n    pool: { vmImage: ubuntu-latest }\n    steps:\n    - task: Docker@2\n      inputs: { command: buildAndPush, containerRegistry: acr-conn, repository: taskflow, tags: $(Build.SourceVersion) }\n- stage: Deploy_Prod\n  dependsOn: Build\n  jobs:\n  - deployment: deploy\n    environment: prod          # approvals + checks live on the Environment\n    strategy: { runOnce: { deploy: { steps: [ { task: HelmDeploy@0, inputs: { connectionType: Kubernetes Service Connection, command: upgrade, chartPath: deploy/helm/taskflow } } ] } } }\n```\n**Environments** hold approvals, branch control and business-hours checks; **branch policies** on `main` require PR build validation, reviewers and linked work items. Jenkinsfile in this repo is the same flow."
+  },
+  {
+   "question": "What are service connections and how do you secure them?",
+   "topic": "Azure DevOps",
+   "level": "Mid",
+   "answer": "A service connection stores how a pipeline authenticates to an external system (Azure, Kubernetes, ACR, AWS). Secure them by: **Workload identity federation (OIDC)** instead of client secrets; scope to a resource group; **pipeline permissions** (only listed pipelines may use it); **approvals and checks** on the connection; audit usage. Same idea as Jenkins credentials + RBAC here."
+  },
+  {
+   "question": "How do pipelines read secrets from Azure Key Vault safely?",
+   "topic": "Azure",
+   "level": "Mid",
+   "answer": "Use a **variable group linked to Key Vault** or the `AzureKeyVault@2` task with a service connection that uses **workload identity federation**. Grant the identity only `get`/`list` on secrets (Key Vault RBAC role *Key Vault Secrets User*). Secrets are masked in logs; never `echo` them; prefer passing them as env vars to the one step that needs them. Rotate in Key Vault without touching pipelines. On AKS, use the **Secrets Store CSI driver** with workload identity instead of copying secrets into Kubernetes."
+  },
+  {
+   "question": "AWS vs Azure: map the core services you would use for this app.",
+   "topic": "Azure",
+   "level": "Junior",
+   "answer": "| Need | AWS | Azure |\n| --- | --- | --- |\n| Kubernetes | EKS | AKS |\n| Registry | ECR | ACR |\n| Load balancer / ingress | ALB + LB Controller | Application Gateway (AGIC) / Front Door |\n| Managed MySQL/MariaDB | RDS | Azure Database for MySQL |\n| Redis | ElastiCache | Azure Cache for Redis |\n| Secrets | Secrets Manager / SSM | Key Vault |\n| Identity for pods | IRSA / Pod Identity | Workload Identity |\n| Monitoring | CloudWatch | Azure Monitor / Log Analytics |\n| IaC native | CloudFormation / CDK | Bicep / ARM |"
+  },
+  {
+   "question": "What is Terraform state and why does it need locking?",
+   "topic": "IaC",
+   "level": "Junior",
+   "answer": "State maps resources in code to real IDs and stores their attributes; `plan` diffs code vs state vs reality. Store it **remotely** (S3 + DynamoDB lock, Azure Storage blob lease, Terraform Cloud) so a team shares one truth, **lock** it so two `apply`s cannot run at once, encrypt it (it holds secrets), and never edit it by hand (`terraform state mv/rm/import` instead).\n\n```hcl\nterraform { backend \"s3\" { bucket = \"tf-state-taskflow\" key = \"prod/terraform.tfstate\" region = \"us-east-2\" dynamodb_table = \"tf-lock\" encrypt = true } }\n```"
+  },
+  {
+   "question": "How do you structure Terraform for many environments?",
+   "topic": "IaC",
+   "level": "Mid",
+   "answer": "Reusable **modules** (network, cluster, database, app) with inputs/outputs; one **root per environment** (`envs/prod`, `envs/staging`) calling the modules with different variables and its own state. Pin provider and module versions. Pipeline: `fmt` → `validate` → `tflint`/`checkov` → `plan` (saved, posted to the PR) → approval → `apply` of that exact plan. Drift: scheduled `plan -detailed-exitcode`."
+  },
+  {
+   "question": "Terraform vs Pulumi vs CloudFormation — when would you pick each?",
+   "topic": "IaC",
+   "level": "Mid",
+   "answer": "- **Terraform/OpenTofu**: HCL, huge provider ecosystem, multi-cloud, most common in interviews.\n- **Pulumi**: real languages (Python/TypeScript), loops/tests/packages natively, same providers; good when the team is developer-heavy.\n- **CloudFormation/CDK**: AWS-native, no state file to manage, deep AWS integration, AWS-only.\n- **Bicep**: Azure-native equivalent.\nPick by team skills and cloud mix; keep one per estate."
+  },
+  {
+   "question": "Walk through this project's pipeline from git push to production.",
+   "topic": "CI/CD",
+   "level": "Junior",
+   "answer": "Push → GitHub **webhook** → Jenkins job → agent pod: **lint & compile** → **Kaniko** builds the image and pushes `ghcr.io/satya8848/taskflow:<sha>` → reads Helm **values from the Launchpad** → `helm upgrade --install --wait` → post-upgrade **migrate Job** → **smoke test** → reports result back. Failure at any stage stops the deploy; the old version keeps running; roll back with one click."
+  },
+  {
+   "question": "Blue/green vs canary vs rolling — trade-offs?",
+   "topic": "CI/CD",
+   "level": "Mid",
+   "answer": "- **Rolling**: replace pods gradually; cheap; both versions live briefly; rollback = another rollout.\n- **Blue/green**: full second stack, switch traffic at once; instant rollback; double cost; DB changes must suit both.\n- **Canary**: send 1–10% to the new version, watch error rate/latency (SLOs), then increase; best risk control; needs traffic splitting (ingress weights, service mesh, Argo Rollouts) and good metrics."
+  },
+  {
+   "question": "How do you keep Jenkins secure and reproducible?",
+   "topic": "Jenkins",
+   "level": "Mid",
+   "answer": "Configuration as Code (**JCasC**) + plugins pinned, controller with **0 executors**, builds in **ephemeral Kubernetes agent pods**, credentials in the credentials store (or Vault) and bound only to the steps that need them, least-privilege service accounts per namespace, matrix/role-based authz, CSRF on, regular plugin updates, and the Jenkinsfile in Git (pipeline as code, reviewed by PR)."
+  },
+  {
+   "question": "What security checks do you put in a CI/CD pipeline, and where?",
+   "topic": "DevSecOps",
+   "level": "Mid",
+   "answer": "Shift left, fail fast:\n1. **Pre-commit / PR**: secret scanning (gitleaks), SAST (Semgrep, bandit), dependency scan (SCA: `pip-audit`, `npm audit`, Dependabot), IaC scan (checkov, tfsec, Trivy config).\n2. **Build**: image scan (Trivy/Grype), **SBOM** (Syft), sign the image (cosign), fail on Critical/High with a fix available.\n3. **Deploy**: admission policy (Kyverno/OPA Gatekeeper: no root, no `latest`, signed images only).\n4. **Run**: DAST (OWASP ZAP baseline) against staging, runtime detection (Falco), continuous image re-scan for new CVEs.\nGate on severity + exploitability, track exceptions with expiry."
+  },
+  {
+   "question": "How do you handle secrets across CI/CD and Kubernetes?",
+   "topic": "DevSecOps",
+   "level": "Mid",
+   "answer": "Never in Git or images. Source of truth: **Vault / AWS Secrets Manager / Azure Key Vault**. CI gets them via **OIDC** short-lived identity; Kubernetes via **External Secrets Operator** or the **Secrets Store CSI driver**; pods get identity via IRSA/Workload Identity. Encrypt etcd at rest, restrict `get secrets` with RBAC, rotate automatically, scan for leaks (gitleaks) and revoke on exposure.\n\nIn this project: secrets are generated on the server (root-only files) → Kubernetes Secrets → Jenkins credentials; the Launchpad only shows *set / not set*."
+  },
+  {
+   "question": "What is software supply-chain security (SLSA, SBOM, signing)?",
+   "topic": "DevSecOps",
+   "level": "Senior",
+   "answer": "Prove *what* you ship and *where it came from*: build on trusted, isolated runners; generate an **SBOM** (SPDX/CycloneDX) per image; **sign** images and attest provenance (cosign, SLSA levels); verify signatures at admission; pin dependencies by digest; keep base images minimal and patched. On a new CVE, the SBOM tells you in minutes which images are affected."
+  },
+  {
+   "question": "Describe a patch-management lifecycle (e.g. with Ivanti) and how it maps to containers.",
+   "topic": "Patching",
+   "level": "Mid",
+   "answer": "**Discover** assets → **assess** missing patches/CVEs → **prioritise** (CVSS + EPSS + exposure + KEV list) → **test** in a pilot group → **schedule** maintenance windows → **deploy** in rings → **verify** and **report compliance** → **rollback** plan for failures. Ivanti Neurons/Security Controls automate this for VMs/endpoints.\n\nContainers are patched by **rebuilding**, not patching in place: update the base image, rebuild, scan, redeploy through the pipeline, and roll back by image tag. Hosts (like this EC2) still need OS patching: `unattended-upgrades` for security updates, reboots in a window."
+  },
+  {
+   "question": "A critical CVE is announced in a library we use. What do you do in the first hour?",
+   "topic": "Patching",
+   "level": "Mid",
+   "answer": "1. **Scope**: query SBOMs / image scans for the affected package+version; list services and their exposure.\n2. **Assess**: exploitable here? internet-facing? in KEV? compensating controls (WAF rule, disable feature)?\n3. **Mitigate** now (WAF/Cloudflare rule, config flag) if a fix is not out.\n4. **Patch**: bump version → pipeline (scan gates) → staging → canary → prod.\n5. **Verify** with a re-scan; **communicate** status; record the timeline for the post-incident review."
+  },
+  {
+   "question": "Trace a request to https://tasks.3-131-57-88.sslip.io through this setup.",
+   "topic": "Networking",
+   "level": "Junior",
+   "answer": "1. DNS: sslip.io answers `3.131.57.88`.\n2. AWS **security group** allows 443 to the EC2.\n3. **Host nginx** terminates TLS (Let's Encrypt cert) and forwards to `127.0.0.1:30080`.\n4. **NodePort** 30080 → kube-proxy → **edge nginx** pod (rate limit, gzip, routing by `Host`).\n5. Edge nginx → `taskflow-web.taskflow-prod.svc.cluster.local:8000` (**Service** ClusterIP) → a ready web pod.\n6. In the pod: **nginx sidecar** serves `/assets`, other paths → **gunicorn** → Frappe → MariaDB/Redis Services."
+  },
+  {
+   "question": "How does nginx rate limiting work, and how would you tune it?",
+   "topic": "nginx",
+   "level": "Mid",
+   "answer": "`limit_req_zone $binary_remote_addr zone=z:10m rate=20r/s;` + `limit_req zone=z burst=40 nodelay;` — a leaky bucket per client IP: steady 20 req/s, up to 40 queued extra; `nodelay` serves the burst at once; beyond it → **429**. Tune from real traffic (p99 req/s per IP), key by API key or user instead of IP behind NAT/CDN (use the real client IP from `X-Forwarded-For`/`CF-Connecting-IP` with `set_real_ip_from`)."
+  },
+  {
+   "question": "Reverse proxy vs load balancer vs API gateway vs ingress controller?",
+   "topic": "nginx",
+   "level": "Mid",
+   "answer": "- **Reverse proxy** (nginx): one entry point, TLS, routing, caching, compression.\n- **Load balancer** (ALB/NLB): spreads traffic over targets, health checks; L4 or L7.\n- **API gateway**: L7 + auth, quotas, API keys, transformations, per-route policies.\n- **Ingress controller**: a reverse proxy configured from Kubernetes Ingress/Gateway API objects.\nHere: host nginx (TLS edge) → edge nginx (UI-configured reverse proxy) → Service (L4 load balancing over pods)."
+  },
+  {
+   "question": "What would you put on Cloudflare in front of this app?",
+   "topic": "Cloudflare",
+   "level": "Mid",
+   "answer": "- **DNS** (proxied orange-cloud records) + **CDN** caching for `/assets` (Cache Rules, long TTL, purge on deploy).\n- **WAF**: managed rulesets (OWASP core), custom rules (block bad countries/ASNs, protect `/api/method/login`), **rate limiting rules**, bot fight mode.\n- **SSL/TLS Full (strict)** with an origin certificate; firewall the origin to Cloudflare IP ranges only.\n- **Zero Trust / Access** in front of `launchpad.*` and `jenkins.*`: SSO + MFA, device posture, no public exposure; **Cloudflare Tunnel** so the origin needs no open inbound port."
+  },
+  {
+   "question": "How do you troubleshoot intermittent 502/504 errors at the edge?",
+   "topic": "Networking",
+   "level": "Senior",
+   "answer": "Correlate by time across layers: edge access logs (`$status`, `$upstream_status`, `rt`/`urt`), pod restarts/readiness flaps, HPA events, node pressure. **502** = upstream refused/closed (pod restarting, wrong port, keep-alive mismatch). **504** = upstream too slow (timeouts, saturated workers, slow DB queries). Check `proxy_read_timeout` vs gunicorn `--timeout`, readiness during deploys, and that keep-alive timeouts are shorter on the app than on the proxy."
+  },
+  {
+   "question": "Metrics, logs and traces — how do you correlate them (e.g. in Datadog)?",
+   "topic": "Observability",
+   "level": "Mid",
+   "answer": "Use **unified service tagging** (`service`, `env`, `version`) on every signal. Inject **trace IDs into logs** (APM auto-instrumentation, `dd.trace_id`), so from a slow trace you jump to its logs and to the host/pod metrics at that moment. Build dashboards per service: RED (Rate, Errors, Duration) + USE for infrastructure. In this project the Monitoring page does the same at small scale: proxy RPS/5xx/p95, pod CPU/memory, events and alerts on one timeline."
+  },
+  {
+   "question": "How do you design good alerts that don't page people for nothing?",
+   "topic": "Observability",
+   "level": "Mid",
+   "answer": "Alert on **symptoms users feel** (error rate, latency SLO burn, availability), not on every cause (CPU 80%). Use **SLO burn-rate** alerts (fast burn pages, slow burn tickets), require duration (`for: 5m`), route by severity (PagerDuty high-urgency vs ticket), include a **runbook link** and dashboard in each alert, review noisy alerts weekly and delete or tune them."
+  },
+  {
+   "question": "You get paged at 3 a.m.: error rate on prod is 20%. Walk through your response.",
+   "topic": "On-call",
+   "level": "Mid",
+   "answer": "1. **Acknowledge** (PagerDuty), open the incident channel, set severity.\n2. **Assess impact**: which endpoints/users, since when, recent changes (deploys, config, infra).\n3. **Mitigate first**: roll back the last deploy, scale out, fail over, toggle a feature flag — restore service before root cause.\n4. **Communicate**: status page / stakeholders every 15–30 min.\n5. **Resolve and verify** (error rate back to SLO).\n6. **Blameless postmortem**: timeline, root cause (5 whys), action items with owners.\n\nPractice it here: Deployments → roll back, Monitoring → alerts, labs → bad-deploy / crashloop."
+  },
+  {
+   "question": "Define SLI, SLO, SLA and error budget with an example.",
+   "topic": "On-call",
+   "level": "Senior",
+   "answer": "- **SLI**: measured indicator, e.g. share of board requests with status < 500 and latency < 800 ms.\n- **SLO**: target for it, e.g. 99.5% over 28 days.\n- **SLA**: contract with penalties, looser than the SLO (e.g. 99%).\n- **Error budget**: 0.5% of requests may fail; spend it on releases/experiments; when it is gone, freeze features and fix reliability."
+  },
+  {
+   "question": "Write a robust Python automation call with retries, timeouts and error handling.",
+   "topic": "Python",
+   "level": "Mid",
+   "answer": "```python\nimport logging, time, requests\n\nlog = logging.getLogger(__name__)\n\ndef get_json(url, attempts=4, timeout=5):\n    for attempt in range(1, attempts + 1):\n        try:\n            response = requests.get(url, timeout=timeout)\n            if response.status_code in (429, 502, 503, 504):\n                raise requests.HTTPError(f\"retryable {response.status_code}\", response=response)\n            response.raise_for_status()\n            return response.json()\n        except (requests.ConnectionError, requests.Timeout, requests.HTTPError) as exc:\n            if attempt == attempts or (isinstance(exc, requests.HTTPError) and exc.response is not None and exc.response.status_code < 500 and exc.response.status_code != 429):\n                log.error(\"giving up on %s after %s tries: %s\", url, attempt, exc)\n                raise\n            delay = min(2 ** attempt, 30)\n            log.warning(\"try %s failed (%s); retry in %ss\", attempt, exc, delay)\n            time.sleep(delay)\n```\nAlways set timeouts, retry only idempotent calls on retryable errors, back off exponentially (add jitter), log context, and fail loudly at the end. The Launchpad's Jenkins and Kubernetes clients follow the same pattern."
+  },
+  {
+   "question": "How do you make a Docker image small, fast to build and secure?",
+   "topic": "Containers",
+   "level": "Junior",
+   "answer": "Multi-stage builds (build tools stay in the builder), slim/distroless base, pin base by digest, order layers from least to most changing (deps before code) for cache hits, `.dockerignore`, run as **non-root**, no secrets in layers (use BuildKit secrets), scan with Trivy, one process per container. This repo: a **base image** (Frappe built once) + a thin **app image** so CI only rebuilds the app."
+  },
+  {
+   "question": "How do you load test an app and read the results?",
+   "topic": "Load Testing",
+   "level": "Mid",
+   "answer": "Define the question (capacity? regression? spike?), script realistic user flows with think time, ramp up, hold, ramp down, set **thresholds** (p95, error rate). Read **p95/p99** latency, **RPS**, **errors**, and correlate with pod CPU/memory and HPA replicas to find the **bottleneck**. Change one thing, re-run the same profile, compare."
+  },
+  {
+   "question": "Explain this project's high-level architecture and the trade-offs you made.",
+   "topic": "Architecture",
+   "level": "Senior",
+   "answer": "- **Single EC2 + k3s**: cheapest real Kubernetes; trade-off: no HA, shared with live sites → quotas, guard, one heavy op at a time.\n- **Two-layer nginx**: host nginx keeps TLS for the live sites untouched; in-cluster edge nginx is safe to change from the UI.\n- **One image, two sites** (Launchpad control plane + app workload): fewer builds; the control plane is never redeployed by its own pipeline.\n- **Launchpad as source of truth** for Helm values: UI and CI/CD cannot drift.\n- **In-cluster MariaDB**: free and live; trade-off: backups are your job (nightly CronJob).\n- **Kaniko in-cluster builds**: no Docker daemon; slow on 0.6 vCPU → prebuilt base image.\nFor production: EKS/AKS multi-AZ, managed DB/Redis, ALB/Front Door + WAF, GitOps, Datadog + PagerDuty."
+  },
+  {
+   "question": "How would you design multi-tenant isolation on a shared Kubernetes cluster?",
+   "topic": "Architecture",
+   "level": "Senior",
+   "answer": "Namespace per tenant/team + **RBAC**, **ResourceQuota/LimitRange**, **NetworkPolicies** (default deny, allow by label), Pod Security Admission (restricted), separate node pools with taints for noisy or sensitive tenants, per-tenant service accounts and cloud identities, admission policies (Kyverno), cost allocation by labels. Hard isolation needs: separate clusters or virtual clusters (vcluster)."
+  }
+ ]
+}

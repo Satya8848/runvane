@@ -1,0 +1,24 @@
+# Copyright (c) 2026, Satya and contributors
+# For license information, please see license.txt
+#
+# StackPilot image: Frappe v16 base + the stackpilot app with its Vue UI built.
+# One image runs every component: web, nginx (sidecar), worker, scheduler, socketio, jobs.
+
+ARG BASE_IMAGE=ghcr.io/satya8848/taskflow-base:v16
+FROM ${BASE_IMAGE}
+LABEL org.opencontainers.image.source=https://github.com/Satya8848/stackpilot
+COPY --chown=frappe:frappe . /home/frappe/frappe-bench/apps/stackpilot
+RUN cd apps/stackpilot/frontend && yarn install --frozen-lockfile --silent && yarn build && rm -rf node_modules \
+ && cd /home/frappe/frappe-bench \
+ && env/bin/pip install --no-cache-dir -e apps/stackpilot \
+ && ls -1 apps > sites/apps.txt \
+ && bench build --app stackpilot --production \
+ && rm -rf /home/frappe/.cache
+# Pre-create the site folder so a new named volume mounted here is owned by frappe.
+ARG SITE_NAME=hub.3-131-57-88.sslip.io
+RUN mkdir -p sites/${SITE_NAME}
+COPY --chown=frappe:frappe deploy/entrypoint.sh /usr/local/bin/sp-entrypoint
+COPY --chown=frappe:frappe deploy/nginx-sidecar.conf /home/frappe/nginx-sidecar.conf
+EXPOSE 8001 8080 9000
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/sp-entrypoint"]
+CMD ["web"]

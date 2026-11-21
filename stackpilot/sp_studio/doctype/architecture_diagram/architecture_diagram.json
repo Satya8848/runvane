@@ -1,0 +1,127 @@
+{
+ "actions": [],
+ "creation": "2026-11-21 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "modified": "2026-11-21 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "SP Studio",
+ "name": "Architecture Diagram",
+ "owner": "Administrator",
+ "field_order": [
+  "title",
+  "visibility",
+  "tags",
+  "forked_from",
+  "votes",
+  "c1",
+  "description",
+  "s1",
+  "scene_json",
+  "mermaid",
+  "preview_svg"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Title",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "visibility",
+   "fieldtype": "Select",
+   "label": "Visibility",
+   "options": "Public\nUnlisted\nPrivate",
+   "default": "Private",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "tags",
+   "fieldtype": "Small Text",
+   "label": "Tags"
+  },
+  {
+   "fieldname": "forked_from",
+   "fieldtype": "Link",
+   "label": "Forked From",
+   "options": "Architecture Diagram"
+  },
+  {
+   "fieldname": "votes",
+   "fieldtype": "Int",
+   "label": "Votes",
+   "read_only": 1
+  },
+  {
+   "fieldname": "c1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "s1",
+   "fieldtype": "Section Break",
+   "label": ""
+  },
+  {
+   "fieldname": "scene_json",
+   "fieldtype": "Code",
+   "label": "Board",
+   "options": "JSON"
+  },
+  {
+   "fieldname": "mermaid",
+   "fieldtype": "Code",
+   "label": "Mermaid"
+  },
+  {
+   "fieldname": "preview_svg",
+   "fieldtype": "Long Text",
+   "label": "Preview Svg"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "SP Moderator",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1
+  },
+  {
+   "role": "SP Member",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "if_owner": 1
+  },
+  {
+   "role": "All",
+   "read": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "links": [],
+ "row_format": "Dynamic",
+ "description": "A saved architecture board.",
+ "autoname": "hash",
+ "title_field": "title",
+ "naming_rule": "Random"
+}

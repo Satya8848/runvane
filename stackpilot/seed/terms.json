@@ -1,0 +1,954 @@
+{
+ "terms": [
+  {
+   "term": "Kubernetes",
+   "category": "Kubernetes",
+   "short_definition": "A system that runs containers on one or more servers and keeps them in the state you describe.",
+   "explanation": "You describe what should run (images, replicas, limits) as objects. Kubernetes keeps comparing that wish with reality and fixes the difference: it restarts crashed containers, moves work off broken nodes and rolls out new versions.",
+   "project_example": "TaskFlow, the Launchpad, MariaDB, Redis, Jenkins and the reverse proxy all run as Kubernetes objects on one EC2 node (k3s).",
+   "launchpad_link": "/lp/overview",
+   "related_terms": "k3s, Pod, Deployment, Namespace, Node"
+  },
+  {
+   "term": "k3s",
+   "category": "Kubernetes",
+   "short_definition": "A small, single-binary Kubernetes distribution for edge and small servers.",
+   "explanation": "k3s packs the Kubernetes control plane, containerd and networking into one process that uses about 500 MB of memory. It is fully conformant Kubernetes, so the same manifests work on big clusters.",
+   "project_example": "Installed on the EC2 server with Traefik turned off, because our own nginx is the reverse proxy.",
+   "launchpad_link": "/lp/overview",
+   "related_terms": "Kubernetes, Node, containerd"
+  },
+  {
+   "term": "Node",
+   "category": "Kubernetes",
+   "short_definition": "A machine (VM or physical) that runs pods.",
+   "explanation": "Each node runs the kubelet (talks to the control plane) and a container runtime. The scheduler places pods on nodes that have enough free CPU and memory for their requests.",
+   "project_example": "One node: the EC2 t2.large. The Overview page shows its CPU and memory use.",
+   "launchpad_link": "/lp/overview",
+   "related_terms": "Pod, Resource Request, kubelet"
+  },
+  {
+   "term": "Pod",
+   "category": "Kubernetes",
+   "short_definition": "The smallest unit Kubernetes runs: one or more containers that share network and storage.",
+   "explanation": "Pods are disposable. When one dies, its Deployment makes a new one with a new name and IP. Never rely on a pod's name or IP; use a Service.",
+   "project_example": "Each TaskFlow web replica is a pod running gunicorn. See them, their CPU and memory, and their logs on the Deployments page.",
+   "launchpad_link": "/lp/deployments",
+   "related_terms": "Deployment, Service, Container"
+  },
+  {
+   "term": "Deployment",
+   "category": "Kubernetes",
+   "short_definition": "An object that keeps a set number of identical pods running and rolls out changes to them.",
+   "explanation": "Change the pod template (image, env, resources) and the Deployment starts a rolling update: new pods come up, old pods go away, a few at a time. Each change is a new revision you can roll back to.",
+   "project_example": "taskflow-web, taskflow-worker, taskflow-scheduler and taskflow-socketio are Deployments in the taskflow-prod namespace.",
+   "launchpad_link": "/lp/deployments",
+   "related_terms": "ReplicaSet, Rolling Update, Rollback, Pod"
+  },
+  {
+   "term": "ReplicaSet",
+   "category": "Kubernetes",
+   "short_definition": "The object a Deployment uses to keep N copies of one pod template.",
+   "explanation": "Every Deployment revision has its own ReplicaSet. Old ReplicaSets are kept with 0 replicas; that is how roll back works.",
+   "project_example": "The Launchpad reads ReplicaSets to show the rollout history and the images you can roll back to.",
+   "launchpad_link": "/lp/deployments",
+   "related_terms": "Deployment, Rollback, Revision"
+  },
+  {
+   "term": "Revision",
+   "category": "Kubernetes",
+   "short_definition": "One numbered version of a Deployment's pod template.",
+   "explanation": "Kubernetes adds 1 every time the template changes. `kubectl rollout history` lists them.",
+   "project_example": "The Deployments page lists revisions with their image tags; Roll back picks one.",
+   "launchpad_link": "/lp/deployments",
+   "related_terms": "ReplicaSet, Rollback"
+  },
+  {
+   "term": "Rolling Update",
+   "category": "Kubernetes",
+   "short_definition": "Replacing pods a few at a time so the app stays up during a change.",
+   "explanation": "maxSurge (extra pods allowed) and maxUnavailable (pods allowed down) control the pace. A readiness probe decides when a new pod may take traffic.",
+   "project_example": "Every deploy, env-var change or restart from the Launchpad is a rolling update; TaskFlow web uses maxUnavailable 0.",
+   "launchpad_link": "/lp/deployments",
+   "related_terms": "Deployment, Readiness Probe"
+  },
+  {
+   "term": "Rollback",
+   "category": "Kubernetes",
+   "short_definition": "Returning a Deployment to an earlier, known-good version.",
+   "explanation": "Because old ReplicaSets are kept, a rollback is just another rolling update to the old pod template.",
+   "project_example": "Deployments page > Roll back: sets every TaskFlow Deployment to the image of the revision you pick.",
+   "launchpad_link": "/lp/deployments",
+   "related_terms": "Revision, Deployment Event"
+  },
+  {
+   "term": "Namespace",
+   "category": "Kubernetes",
+   "short_definition": "A named area of the cluster that groups and isolates objects.",
+   "explanation": "Names only need to be unique inside a namespace. Quotas, RBAC and network policies usually apply per namespace.",
+   "project_example": "launchpad (control plane, MariaDB, proxy), taskflow-prod, taskflow-staging and ci (Jenkins).",
+   "launchpad_link": "/lp/environments",
+   "related_terms": "ResourceQuota, RBAC"
+  },
+  {
+   "term": "Service",
+   "category": "Kubernetes",
+   "short_definition": "A stable name and IP in front of a changing set of pods.",
+   "explanation": "A Service selects pods by label and load-balances across the ready ones. ClusterIP is internal only; NodePort also opens a port on every node.",
+   "project_example": "taskflow-web.taskflow-prod.svc.cluster.local:8000 is how the proxy and k6 reach the web pods.",
+   "launchpad_link": "/lp/proxy",
+   "related_terms": "Pod, NodePort, ClusterIP, DNS"
+  },
+  {
+   "term": "ClusterIP",
+   "category": "Kubernetes",
+   "short_definition": "The default Service type: a virtual IP reachable only inside the cluster.",
+   "explanation": "Use it for anything that should not be on the internet, like databases.",
+   "project_example": "MariaDB, Redis and the TaskFlow Services are ClusterIP.",
+   "launchpad_link": "",
+   "related_terms": "Service, NodePort"
+  },
+  {
+   "term": "NodePort",
+   "category": "Kubernetes",
+   "short_definition": "A Service type that also listens on a fixed port (30000–32767) on every node.",
+   "explanation": "Handy on a single server: the host nginx forwards to the NodePort. Keep the port closed in the cloud firewall.",
+   "project_example": "The edge nginx is NodePort 30080; the host nginx proxies the sslip.io names to it. The AWS security group does not open it.",
+   "launchpad_link": "/lp/proxy",
+   "related_terms": "Service, Reverse Proxy, Security Group"
+  },
+  {
+   "term": "ConfigMap",
+   "category": "Kubernetes",
+   "short_definition": "An object that stores non-secret configuration as key–value pairs or files.",
+   "explanation": "Pods mount it as files or read it as env vars. Changing it does not restart pods by itself; roll them to pick up a new file.",
+   "project_example": "The edge nginx reads nginx.conf from the ConfigMap edge-nginx-conf, which the Reverse proxy page rewrites.",
+   "launchpad_link": "/lp/proxy",
+   "related_terms": "Secret, Reverse Proxy"
+  },
+  {
+   "term": "Secret",
+   "category": "Kubernetes",
+   "short_definition": "Like a ConfigMap, for sensitive values such as passwords and tokens.",
+   "explanation": "Values are base64-encoded (not encrypted) unless encryption at rest is turned on; limit who can read them with RBAC.",
+   "project_example": "Database passwords, the GHCR pull token and the Launchpad callback token are Secrets.",
+   "launchpad_link": "/lp/settings",
+   "related_terms": "ConfigMap, RBAC"
+  },
+  {
+   "term": "Job",
+   "category": "Kubernetes",
+   "short_definition": "An object that runs pods until a task finishes successfully.",
+   "explanation": "backoffLimit sets retries; ttlSecondsAfterFinished cleans it up; activeDeadlineSeconds caps the run time.",
+   "project_example": "Each load test is a k6 Job; each deploy runs a bench migrate Job; proxy validation runs an nginx -t Job.",
+   "launchpad_link": "/lp/load-tests",
+   "related_terms": "k6, CronJob"
+  },
+  {
+   "term": "CronJob",
+   "category": "Kubernetes",
+   "short_definition": "A Job that runs on a schedule.",
+   "explanation": "Uses cron syntax, e.g. `0 2 * * *` for 02:00 every day.",
+   "project_example": "A nightly MariaDB backup CronJob writes a dump to the node's disk.",
+   "launchpad_link": "",
+   "related_terms": "Job"
+  },
+  {
+   "term": "StatefulSet",
+   "category": "Kubernetes",
+   "short_definition": "Like a Deployment, for apps that need a stable identity and their own disk.",
+   "explanation": "Pods get fixed names (mariadb-0) and each gets its own PersistentVolumeClaim that survives restarts.",
+   "project_example": "MariaDB runs as a StatefulSet with a 10 GiB volume.",
+   "launchpad_link": "",
+   "related_terms": "PersistentVolume, Deployment"
+  },
+  {
+   "term": "PersistentVolume",
+   "category": "Kubernetes",
+   "short_definition": "Storage in the cluster that outlives pods.",
+   "explanation": "A pod asks for storage with a PersistentVolumeClaim; k3s's local-path provisioner creates a directory on the node.",
+   "project_example": "MariaDB data and the Frappe sites volume (uploaded files) are PersistentVolumes.",
+   "launchpad_link": "",
+   "related_terms": "StatefulSet"
+  },
+  {
+   "term": "Resource Request",
+   "category": "Kubernetes",
+   "short_definition": "The CPU and memory a container is guaranteed; the scheduler uses it to place pods.",
+   "explanation": "100m CPU = one tenth of a core. If requests on a node add up to more than it has, new pods stay Pending.",
+   "project_example": "Web pods request 100m CPU and 256Mi; change it on the Environments page.",
+   "launchpad_link": "/lp/environments",
+   "related_terms": "Resource Limit, ResourceQuota"
+  },
+  {
+   "term": "Resource Limit",
+   "category": "Kubernetes",
+   "short_definition": "The most CPU or memory a container may use.",
+   "explanation": "Over the CPU limit the container is throttled (slower); over the memory limit it is killed (OOMKilled).",
+   "project_example": "Limits protect the live sites on the same server. Web pods are limited to 300m CPU and 400Mi.",
+   "launchpad_link": "/lp/environments",
+   "related_terms": "Resource Request, OOMKilled, Throttling"
+  },
+  {
+   "term": "ResourceQuota",
+   "category": "Kubernetes",
+   "short_definition": "A cap on the total requests and limits of all pods in a namespace.",
+   "explanation": "If a new pod would exceed the quota, Kubernetes refuses to create it.",
+   "project_example": "Each TaskFlow namespace has a quota, so the whole demo can never take the CPU the live sites need.",
+   "launchpad_link": "/lp/overview",
+   "related_terms": "Resource Limit, Namespace"
+  },
+  {
+   "term": "HPA",
+   "category": "Kubernetes",
+   "short_definition": "Horizontal Pod Autoscaler: adds or removes pod replicas based on load (usually CPU).",
+   "explanation": "Every 15 s the HPA compares average CPU use (as a % of the request) with the target and changes replicas between min and max. It needs metrics-server.",
+   "project_example": "taskflow-web has an HPA (min 2, max 3, 70% CPU). Watch it scale during a load test on the Performance page.",
+   "launchpad_link": "/lp/performance",
+   "related_terms": "metrics-server, Resource Request, Load Test"
+  },
+  {
+   "term": "metrics-server",
+   "category": "Kubernetes",
+   "short_definition": "The cluster add-on that reports live CPU and memory of nodes and pods.",
+   "explanation": "It feeds `kubectl top` and the HPA. It keeps only the latest values, not history.",
+   "project_example": "The Launchpad reads it for the live pod usage charts.",
+   "launchpad_link": "/lp/performance",
+   "related_terms": "HPA"
+  },
+  {
+   "term": "Readiness Probe",
+   "category": "Kubernetes",
+   "short_definition": "A check that tells Kubernetes when a pod may receive traffic.",
+   "explanation": "Until the probe passes, the Service does not send the pod requests. A liveness probe instead restarts a stuck pod.",
+   "project_example": "Web pods are ready when GET /api/method/ping answers.",
+   "launchpad_link": "/lp/deployments",
+   "related_terms": "Liveness Probe, Rolling Update"
+  },
+  {
+   "term": "Liveness Probe",
+   "category": "Kubernetes",
+   "short_definition": "A check that restarts a container when it stops responding.",
+   "explanation": "Keep it lenient: a too-strict liveness probe restarts healthy pods under load.",
+   "project_example": "Web pods: TCP check on port 8000.",
+   "launchpad_link": "",
+   "related_terms": "Readiness Probe"
+  },
+  {
+   "term": "RBAC",
+   "category": "Security",
+   "short_definition": "Role-Based Access Control: who may do what to which Kubernetes objects.",
+   "explanation": "A Role lists allowed verbs (get, patch...) on resources; a RoleBinding gives it to a ServiceAccount or user.",
+   "project_example": "The Launchpad's ServiceAccount may only manage Deployments, HPAs, Jobs and ConfigMaps in its own namespaces.",
+   "launchpad_link": "/lp/settings",
+   "related_terms": "ServiceAccount, Namespace"
+  },
+  {
+   "term": "ServiceAccount",
+   "category": "Security",
+   "short_definition": "An identity for software running in a pod.",
+   "explanation": "Its token is mounted into the pod; the Kubernetes client uses it automatically (in-cluster config).",
+   "project_example": "The Launchpad pod runs as ServiceAccount launchpad-controller.",
+   "launchpad_link": "/lp/settings",
+   "related_terms": "RBAC"
+  },
+  {
+   "term": "kubelet",
+   "category": "Kubernetes",
+   "short_definition": "The agent on each node that starts pods and reports their health.",
+   "explanation": "It receives pod specs from the API server, asks the container runtime to run them and runs their probes.",
+   "project_example": "Part of the single k3s process on the EC2 node.",
+   "launchpad_link": "",
+   "related_terms": "Node, containerd"
+  },
+  {
+   "term": "Deployment Event",
+   "category": "CI/CD",
+   "short_definition": "The Launchpad's audit record of one change to an environment.",
+   "explanation": "Who did what and when: deploy, scale, roll back, restart, config or proxy change, with the detail as JSON.",
+   "project_example": "Listed on the Deployments page for each environment.",
+   "launchpad_link": "/lp/deployments",
+   "related_terms": "Rollback, Deployment"
+  },
+  {
+   "term": "kubectl",
+   "category": "Kubernetes",
+   "short_definition": "The command-line client for the Kubernetes API.",
+   "explanation": "Every Launchpad button is an API call you could also do with kubectl, e.g. `kubectl -n taskflow-prod scale deploy taskflow-web --replicas 3`.",
+   "project_example": "Use it over SSH to cross-check what the Launchpad shows.",
+   "launchpad_link": "",
+   "related_terms": "Kubernetes"
+  },
+  {
+   "term": "Helm",
+   "category": "Kubernetes",
+   "short_definition": "A package manager for Kubernetes: templates plus values make manifests.",
+   "explanation": "A chart is a folder of templates. `helm upgrade --install` renders it with your values and applies it as one release with history.",
+   "project_example": "deploy/helm/taskflow is the chart. Jenkins runs helm upgrade with values it reads from the Launchpad.",
+   "launchpad_link": "/lp/pipelines",
+   "related_terms": "Chart, Release"
+  },
+  {
+   "term": "Chart",
+   "category": "Kubernetes",
+   "short_definition": "A Helm package: templates, default values and metadata.",
+   "explanation": "Charts can be versioned and shared.",
+   "project_example": "deploy/helm/taskflow in the repo.",
+   "launchpad_link": "",
+   "related_terms": "Helm"
+  },
+  {
+   "term": "Release",
+   "category": "Kubernetes",
+   "short_definition": "One installed instance of a Helm chart, with its own revision history.",
+   "explanation": "`helm history taskflow -n taskflow-prod` lists it.",
+   "project_example": "Release taskflow in each environment namespace.",
+   "launchpad_link": "",
+   "related_terms": "Helm"
+  },
+  {
+   "term": "OOMKilled",
+   "category": "Performance",
+   "short_definition": "A container killed because it went over its memory limit.",
+   "explanation": "Shows as a restart with reason OOMKilled. Fix: raise the limit or use less memory (fewer gunicorn workers).",
+   "project_example": "Restart counts appear on the Deployments page.",
+   "launchpad_link": "/lp/deployments",
+   "related_terms": "Resource Limit"
+  },
+  {
+   "term": "Throttling",
+   "category": "Performance",
+   "short_definition": "Slowing a container that tries to use more CPU than its limit.",
+   "explanation": "The app gets slower instead of crashing; latency rises under load.",
+   "project_example": "Watch p95 climb when web pods hit 300m CPU in a load test.",
+   "launchpad_link": "/lp/performance",
+   "related_terms": "Resource Limit, p95"
+  },
+  {
+   "term": "Container",
+   "category": "Containers",
+   "short_definition": "A process packaged with its files and libraries, isolated from the rest of the machine.",
+   "explanation": "It starts in milliseconds and runs the same everywhere the image is available.",
+   "project_example": "Each TaskFlow component (web, worker...) is a container from the same image.",
+   "launchpad_link": "",
+   "related_terms": "Image, Pod"
+  },
+  {
+   "term": "Image",
+   "category": "Containers",
+   "short_definition": "A read-only template a container starts from: layers of files plus a start command.",
+   "explanation": "Built from a Containerfile/Dockerfile and stored in a registry under name:tag.",
+   "project_example": "ghcr.io/satya8848/taskflow:<git sha> holds Frappe v16 and the taskflow app.",
+   "launchpad_link": "/lp/deployments",
+   "related_terms": "Registry, Tag, Containerfile"
+  },
+  {
+   "term": "Tag",
+   "category": "Containers",
+   "short_definition": "A label on an image version, e.g. :main or :3f2a1c9.",
+   "explanation": "Tags can move; a git-SHA tag never changes, so you always know what runs.",
+   "project_example": "Jenkins tags every image with the short commit SHA.",
+   "launchpad_link": "/lp/pipelines",
+   "related_terms": "Image"
+  },
+  {
+   "term": "Registry",
+   "category": "Containers",
+   "short_definition": "A server that stores and serves images.",
+   "explanation": "Docker Hub, GitHub Container Registry (GHCR) and ECR are registries.",
+   "project_example": "Images go to GHCR, free for public packages.",
+   "launchpad_link": "/lp/settings",
+   "related_terms": "GHCR, Image"
+  },
+  {
+   "term": "GHCR",
+   "category": "Containers",
+   "short_definition": "GitHub Container Registry, at ghcr.io.",
+   "explanation": "Authenticates with a GitHub token that has packages scope.",
+   "project_example": "ghcr.io/satya8848/taskflow.",
+   "launchpad_link": "/lp/settings",
+   "related_terms": "Registry, PAT"
+  },
+  {
+   "term": "Containerfile",
+   "category": "Containers",
+   "short_definition": "The build recipe for an image (also called Dockerfile).",
+   "explanation": "Each instruction adds a layer. Multi-stage builds keep build tools out of the final image.",
+   "project_example": "deploy/docker/Containerfile builds Frappe + taskflow with assets.",
+   "launchpad_link": "",
+   "related_terms": "Image, Kaniko"
+  },
+  {
+   "term": "Kaniko",
+   "category": "Containers",
+   "short_definition": "A tool that builds images inside a Kubernetes pod without a Docker daemon.",
+   "explanation": "Safe in a cluster because it needs no privileged Docker socket.",
+   "project_example": "The Jenkins Build stage runs Kaniko in a short-lived agent pod.",
+   "launchpad_link": "/lp/pipelines",
+   "related_terms": "Jenkins Agent, Image"
+  },
+  {
+   "term": "containerd",
+   "category": "Containers",
+   "short_definition": "The container runtime that actually starts containers on a node.",
+   "explanation": "k3s ships with it; Docker uses it underneath too.",
+   "project_example": "Runs every pod on the EC2 node.",
+   "launchpad_link": "",
+   "related_terms": "k3s"
+  },
+  {
+   "term": "CI/CD",
+   "category": "CI/CD",
+   "short_definition": "Continuous Integration / Continuous Delivery: build, test and ship every change automatically.",
+   "explanation": "CI: every push is built and tested. CD: a passing build is deployed by the pipeline, not by hand.",
+   "project_example": "Push to main, then Jenkins builds, tests, pushes the image and deploys to prod.",
+   "launchpad_link": "/lp/pipelines",
+   "related_terms": "Jenkins, Pipeline, Webhook"
+  },
+  {
+   "term": "Jenkins",
+   "category": "Jenkins",
+   "short_definition": "An open-source automation server that runs build and deploy pipelines.",
+   "explanation": "A controller schedules work; agents run it. Pipelines are code (Jenkinsfile) in the repo.",
+   "project_example": "Runs in namespace ci; the Launchpad starts and follows its builds through the REST API.",
+   "launchpad_link": "/lp/pipelines",
+   "related_terms": "Jenkinsfile, Jenkins Agent, Pipeline"
+  },
+  {
+   "term": "Jenkinsfile",
+   "category": "Jenkins",
+   "short_definition": "The pipeline definition, stored in the repo.",
+   "explanation": "Declarative syntax: pipeline { stages { stage('Build') { steps {...} } } }.",
+   "project_example": "Jenkinsfile at the repo root: checkout, lint, test, build, push, deploy, migrate, smoke test.",
+   "launchpad_link": "/lp/pipelines",
+   "related_terms": "Pipeline, Stage"
+  },
+  {
+   "term": "Pipeline",
+   "category": "CI/CD",
+   "short_definition": "The ordered steps that take a commit to production.",
+   "explanation": "A failed step stops the pipeline, so a broken change never deploys.",
+   "project_example": "Each run is a Pipeline Run in the Launchpad, with its stages and console output.",
+   "launchpad_link": "/lp/pipelines",
+   "related_terms": "Stage, Jenkinsfile"
+  },
+  {
+   "term": "Stage",
+   "category": "Jenkins",
+   "short_definition": "One named step of a pipeline, e.g. Build or Deploy.",
+   "explanation": "Stage View shows each stage's status and time.",
+   "project_example": "The Pipelines page shows stages live.",
+   "launchpad_link": "/lp/pipelines",
+   "related_terms": "Pipeline"
+  },
+  {
+   "term": "Jenkins Agent",
+   "category": "Jenkins",
+   "short_definition": "A worker that runs pipeline steps for the Jenkins controller.",
+   "explanation": "With the Kubernetes plugin, each build gets a fresh agent pod that is deleted afterwards.",
+   "project_example": "Builds run in a pod with kaniko, helm and kubectl containers.",
+   "launchpad_link": "",
+   "related_terms": "Jenkins, Kaniko"
+  },
+  {
+   "term": "JCasC",
+   "category": "Jenkins",
+   "short_definition": "Jenkins Configuration as Code: Jenkins settings in a YAML file.",
+   "explanation": "Rebuild Jenkins from scratch and get the same jobs, credentials and plugins.",
+   "project_example": "deploy/jenkins/values.yaml holds the JCasC config.",
+   "launchpad_link": "",
+   "related_terms": "Jenkins, Helm"
+  },
+  {
+   "term": "Webhook",
+   "category": "CI/CD",
+   "short_definition": "An HTTP call one system makes to another when an event happens.",
+   "explanation": "GitHub calls Jenkins on every push; the body says which commit.",
+   "project_example": "The repo's webhook calls https://jenkins.3-131-57-88.sslip.io/github-webhook/.",
+   "launchpad_link": "/lp/pipelines",
+   "related_terms": "CI/CD, Jenkins"
+  },
+  {
+   "term": "Smoke Test",
+   "category": "CI/CD",
+   "short_definition": "A quick check right after a deploy that the main thing works.",
+   "explanation": "If it fails, roll back before users notice.",
+   "project_example": "The pipeline calls /api/method/ping and the board API after each deploy.",
+   "launchpad_link": "/lp/pipelines",
+   "related_terms": "Rollback, Pipeline"
+  },
+  {
+   "term": "Artifact",
+   "category": "CI/CD",
+   "short_definition": "Something a build produces and keeps, such as an image, a package or a report.",
+   "explanation": "",
+   "project_example": "Our main artifact is the container image on GHCR.",
+   "launchpad_link": "",
+   "related_terms": "Image"
+  },
+  {
+   "term": "Git",
+   "category": "Git",
+   "short_definition": "A distributed version-control system.",
+   "explanation": "Every change is a commit; branches let work happen in parallel.",
+   "project_example": "The code lives at github.com/Satya8848/taskflow-launchpad.",
+   "launchpad_link": "/lp/settings",
+   "related_terms": "Commit, Branch"
+  },
+  {
+   "term": "Commit",
+   "category": "Git",
+   "short_definition": "A saved snapshot of the code with a message and a unique SHA.",
+   "explanation": "The short SHA (7 characters) names an exact version.",
+   "project_example": "Image tags are commit SHAs.",
+   "launchpad_link": "/lp/pipelines",
+   "related_terms": "Git, Tag"
+  },
+  {
+   "term": "Branch",
+   "category": "Git",
+   "short_definition": "A moving pointer to a line of commits.",
+   "explanation": "main is deployed; feature branches merge through pull requests.",
+   "project_example": "Pipelines take any branch or tag as GIT_REF.",
+   "launchpad_link": "/lp/pipelines",
+   "related_terms": "Git"
+  },
+  {
+   "term": "PAT",
+   "category": "Security",
+   "short_definition": "Personal Access Token: a GitHub token used instead of a password.",
+   "explanation": "Fine-grained PATs limit the token to some repos and permissions. Rotate them.",
+   "project_example": "Jenkins pushes images to GHCR with a PAT stored as a Jenkins credential.",
+   "launchpad_link": "/lp/settings",
+   "related_terms": "GHCR, Secret"
+  },
+  {
+   "term": "nginx",
+   "category": "nginx",
+   "short_definition": "A fast web server and reverse proxy.",
+   "explanation": "It handles TLS, compression, caching, rate limits and forwards requests to apps.",
+   "project_example": "Two layers: host nginx (TLS, also serves the live sites) and an in-cluster edge nginx that the Launchpad configures.",
+   "launchpad_link": "/lp/proxy",
+   "related_terms": "Reverse Proxy, TLS"
+  },
+  {
+   "term": "Reverse Proxy",
+   "category": "nginx",
+   "short_definition": "A server in front of apps that receives client requests and forwards them.",
+   "explanation": "Clients only see the proxy. It can route by hostname, terminate TLS, cache and limit traffic.",
+   "project_example": "Edge nginx routes tasks.*, launchpad.* and jenkins.* to their Services.",
+   "launchpad_link": "/lp/proxy",
+   "related_terms": "nginx, Upstream"
+  },
+  {
+   "term": "Upstream",
+   "category": "nginx",
+   "short_definition": "The backend server a proxy forwards to.",
+   "explanation": "In Kubernetes, use the Service DNS name, not pod IPs.",
+   "project_example": "Each Proxy Route has an upstream, e.g. taskflow-web.taskflow-prod.svc.cluster.local:8000.",
+   "launchpad_link": "/lp/proxy",
+   "related_terms": "Service, Reverse Proxy"
+  },
+  {
+   "term": "Rate Limiting",
+   "category": "nginx",
+   "short_definition": "Capping how many requests one client may make per second.",
+   "explanation": "nginx limit_req uses a leaky bucket: rate is the steady speed, burst the queue size. Over the limit, clients get 429.",
+   "project_example": "Each Proxy Route sets requests/s and burst. Try a load test with a low limit and watch errors appear.",
+   "launchpad_link": "/lp/proxy",
+   "related_terms": "429, Reverse Proxy"
+  },
+  {
+   "term": "429",
+   "category": "Networking",
+   "short_definition": "HTTP status Too Many Requests: the rate limit was hit.",
+   "explanation": "Clients should back off and retry later.",
+   "project_example": "Shown in load-test error rates when a route's limit is too low.",
+   "launchpad_link": "/lp/load-tests",
+   "related_terms": "Rate Limiting"
+  },
+  {
+   "term": "gzip",
+   "category": "nginx",
+   "short_definition": "Compression of text responses (HTML, CSS, JS, JSON).",
+   "explanation": "Often cuts transfer size by 70%; costs a little CPU.",
+   "project_example": "A per-route switch on the Reverse proxy page.",
+   "launchpad_link": "/lp/proxy",
+   "related_terms": "nginx"
+  },
+  {
+   "term": "TLS",
+   "category": "Networking",
+   "short_definition": "Transport Layer Security: encryption for HTTPS.",
+   "explanation": "The server proves its identity with a certificate signed by a trusted authority.",
+   "project_example": "Host nginx terminates TLS with Let's Encrypt certificates.",
+   "launchpad_link": "",
+   "related_terms": "Let's Encrypt, HTTPS"
+  },
+  {
+   "term": "HTTPS",
+   "category": "Networking",
+   "short_definition": "HTTP over TLS.",
+   "explanation": "Browsers mark plain HTTP as Not Secure.",
+   "project_example": "All demo URLs are https://*.3-131-57-88.sslip.io.",
+   "launchpad_link": "",
+   "related_terms": "TLS"
+  },
+  {
+   "term": "Let's Encrypt",
+   "category": "Networking",
+   "short_definition": "A free certificate authority with automated issuing (ACME).",
+   "explanation": "certbot proves you control the domain and renews certificates every 60–90 days.",
+   "project_example": "certbot issued certificates for the sslip.io names; the live site's certificate is separate and untouched.",
+   "launchpad_link": "",
+   "related_terms": "TLS, sslip.io"
+  },
+  {
+   "term": "sslip.io",
+   "category": "Networking",
+   "short_definition": "Free wildcard DNS: any name ending in <ip>.sslip.io resolves to that IP.",
+   "explanation": "launchpad.3-131-57-88.sslip.io resolves to 3.131.57.88 with no DNS setup.",
+   "project_example": "All demo hostnames use it.",
+   "launchpad_link": "",
+   "related_terms": "DNS"
+  },
+  {
+   "term": "DNS",
+   "category": "Networking",
+   "short_definition": "The system that turns names into IP addresses.",
+   "explanation": "Inside Kubernetes, CoreDNS resolves <service>.<namespace>.svc.cluster.local.",
+   "project_example": "Edge nginx resolves upstreams through kube-dns.",
+   "launchpad_link": "",
+   "related_terms": "Service, sslip.io"
+  },
+  {
+   "term": "Security Group",
+   "category": "Cloud",
+   "short_definition": "AWS's virtual firewall for an EC2 instance.",
+   "explanation": "Only listed ports and sources can connect.",
+   "project_example": "launch-wizard-6 allows 22, 80 and 443; NodePorts stay closed.",
+   "launchpad_link": "",
+   "related_terms": "NodePort"
+  },
+  {
+   "term": "EC2",
+   "category": "Cloud",
+   "short_definition": "Amazon's virtual servers.",
+   "explanation": "Instance types set CPU and memory; t-types are burstable.",
+   "project_example": "A t2.large in us-east-2 runs everything.",
+   "launchpad_link": "/lp/overview",
+   "related_terms": "Burstable Instance"
+  },
+  {
+   "term": "Burstable Instance",
+   "category": "Cloud",
+   "short_definition": "A cloud VM that has a low baseline CPU and can burst above it using credits.",
+   "explanation": "A t2.large earns credits at 30% per vCPU. Long high-CPU work spends credits; at zero, the VM is held to the baseline and everything on it slows.",
+   "project_example": "Why the Launchpad caps load tests and runs only one heavy job at a time: the live sites share this VM.",
+   "launchpad_link": "/lp/overview",
+   "related_terms": "Live-Site Guard, EC2"
+  },
+  {
+   "term": "Frappe",
+   "category": "Frappe",
+   "short_definition": "A full-stack Python web framework with a built-in admin UI, REST API and permissions.",
+   "explanation": "You define DocTypes (data models) and Frappe gives you database tables, forms, lists and APIs.",
+   "project_example": "Both TaskFlow and the Launchpad are one Frappe app, on two sites.",
+   "launchpad_link": "",
+   "related_terms": "DocType, Site, Bench"
+  },
+  {
+   "term": "DocType",
+   "category": "Frappe",
+   "short_definition": "Frappe's model: fields, permissions and behaviour of one kind of record.",
+   "explanation": "Each DocType is a table named tab<DocType>.",
+   "project_example": "Tracker Task, Launchpad Environment, Load Test Run and KB Term are DocTypes.",
+   "launchpad_link": "/lp/knowledge-base",
+   "related_terms": "Frappe"
+  },
+  {
+   "term": "Site",
+   "category": "Frappe",
+   "short_definition": "One Frappe tenant: its own database, files and config, chosen by hostname.",
+   "explanation": "One bench (and one image) can serve many sites.",
+   "project_example": "Site launchpad.* (control plane) and site tasks.* (the app) run the same image.",
+   "launchpad_link": "/lp/environments",
+   "related_terms": "Frappe, Bench"
+  },
+  {
+   "term": "Bench",
+   "category": "Frappe",
+   "short_definition": "The folder and CLI that hold Frappe apps and sites.",
+   "explanation": "`bench migrate` applies schema changes; `bench new-site` creates a site.",
+   "project_example": "The image contains a bench; the migrate Job runs bench migrate on deploy.",
+   "launchpad_link": "/lp/pipelines",
+   "related_terms": "Site, Migration"
+  },
+  {
+   "term": "Migration",
+   "category": "Database",
+   "short_definition": "Changing the database schema or data to match new code.",
+   "explanation": "Run it on every deploy, before new pods take traffic.",
+   "project_example": "The Helm pre-upgrade migrate Job runs bench migrate.",
+   "launchpad_link": "/lp/pipelines",
+   "related_terms": "Bench"
+  },
+  {
+   "term": "gunicorn",
+   "category": "Frappe",
+   "short_definition": "The Python web server that runs Frappe's WSGI app with several worker processes.",
+   "explanation": "More workers means more parallel requests but more memory.",
+   "project_example": "Each web pod runs gunicorn with 2 workers.",
+   "launchpad_link": "/lp/environments",
+   "related_terms": "Pod, Resource Limit"
+  },
+  {
+   "term": "Background Worker",
+   "category": "Frappe",
+   "short_definition": "A process that runs queued jobs outside the web request (RQ).",
+   "explanation": "Long tasks (emails, reports, monitoring) go to a queue so users don't wait.",
+   "project_example": "The Launchpad follows pipelines and load tests in long-queue jobs.",
+   "launchpad_link": "/lp/deployments",
+   "related_terms": "Redis, Queue"
+  },
+  {
+   "term": "Queue",
+   "category": "Frappe",
+   "short_definition": "A list of jobs waiting for a worker.",
+   "explanation": "Frappe has short, default and long queues in Redis.",
+   "project_example": "Load-test and pipeline monitors use the long queue.",
+   "launchpad_link": "",
+   "related_terms": "Background Worker, Redis"
+  },
+  {
+   "term": "Redis",
+   "category": "Database",
+   "short_definition": "An in-memory data store used for cache and job queues.",
+   "explanation": "Very fast; data can be lost on restart unless persisted.",
+   "project_example": "One Redis pod serves cache, queue and Socket.IO for each site.",
+   "launchpad_link": "",
+   "related_terms": "Queue"
+  },
+  {
+   "term": "MariaDB",
+   "category": "Database",
+   "short_definition": "An open-source relational database (MySQL fork), Frappe's main database.",
+   "explanation": "Tables, SQL, transactions and indexes.",
+   "project_example": "Runs in the cluster as a StatefulSet; it is the live, free database behind the app, the Launchpad and this knowledge base.",
+   "launchpad_link": "/lp/knowledge-base",
+   "related_terms": "StatefulSet, Index"
+  },
+  {
+   "term": "Index",
+   "category": "Database",
+   "short_definition": "A data structure that makes lookups on a column fast.",
+   "explanation": "Without one, the database scans every row; with too many, writes slow down.",
+   "project_example": "Tracker Task is indexed on project and status for the board query.",
+   "launchpad_link": "",
+   "related_terms": "MariaDB"
+  },
+  {
+   "term": "Socket.IO",
+   "category": "Frappe",
+   "short_definition": "A WebSocket library for real-time updates.",
+   "explanation": "Frappe uses it to push list refreshes and progress to the browser.",
+   "project_example": "The socketio Deployment; the proxy upgrades /socket.io to WebSocket.",
+   "launchpad_link": "/lp/proxy",
+   "related_terms": "WebSocket"
+  },
+  {
+   "term": "WebSocket",
+   "category": "Networking",
+   "short_definition": "A long-lived two-way connection between browser and server.",
+   "explanation": "Proxies must forward the Upgrade and Connection headers.",
+   "project_example": "Handled by the websocket_upstream of a Proxy Route.",
+   "launchpad_link": "/lp/proxy",
+   "related_terms": "Socket.IO"
+  },
+  {
+   "term": "API Key",
+   "category": "Security",
+   "short_definition": "A key and secret pair that lets a program call the API as a user.",
+   "explanation": "Sent as `Authorization: token key:secret`.",
+   "project_example": "The load-test user calls TaskFlow with an API key.",
+   "launchpad_link": "/lp/environments",
+   "related_terms": "Secret"
+  },
+  {
+   "term": "Load Test",
+   "category": "Load Testing",
+   "short_definition": "Sending many simulated users to an app to see how it behaves under load.",
+   "explanation": "Measure latency, throughput and errors; find the point where it breaks.",
+   "project_example": "Run one from the Load tests page; results go to the Performance page.",
+   "launchpad_link": "/lp/load-tests",
+   "related_terms": "k6, VU, p95"
+  },
+  {
+   "term": "k6",
+   "category": "Load Testing",
+   "short_definition": "An open-source load-testing tool by Grafana; tests are JavaScript.",
+   "explanation": "Scenarios, thresholds and a JSON summary built in.",
+   "project_example": "Each test runs grafana/k6 as a Kubernetes Job with a script the Launchpad generates.",
+   "launchpad_link": "/lp/load-tests",
+   "related_terms": "Load Test, Threshold"
+  },
+  {
+   "term": "VU",
+   "category": "Load Testing",
+   "short_definition": "Virtual User: one simulated user looping through the test script.",
+   "explanation": "VUs × (1 / time per iteration) ≈ requests per second.",
+   "project_example": "Profiles set VUs, capped at 50 on this shared server.",
+   "launchpad_link": "/lp/load-tests",
+   "related_terms": "Load Test, Think Time"
+  },
+  {
+   "term": "Think Time",
+   "category": "Load Testing",
+   "short_definition": "Pause between a virtual user's actions, like a real user reading.",
+   "explanation": "Without it, a few VUs make an unrealistic flood of requests.",
+   "project_example": "Profile field Think Time (ms).",
+   "launchpad_link": "/lp/load-tests",
+   "related_terms": "VU"
+  },
+  {
+   "term": "Ramp Up",
+   "category": "Load Testing",
+   "short_definition": "Raising the number of virtual users gradually.",
+   "explanation": "Shows at what load latency starts to climb, and gives the HPA time to react.",
+   "project_example": "Profile field Ramp Up (s).",
+   "launchpad_link": "/lp/load-tests",
+   "related_terms": "VU, HPA"
+  },
+  {
+   "term": "Threshold",
+   "category": "Load Testing",
+   "short_definition": "A pass/fail rule for a load test, e.g. p95 < 800 ms.",
+   "explanation": "k6 marks the run failed when a threshold is crossed.",
+   "project_example": "Profiles set p95 and error-rate thresholds; runs show Passed or Failed.",
+   "launchpad_link": "/lp/load-tests",
+   "related_terms": "p95, Error Rate"
+  },
+  {
+   "term": "Latency",
+   "category": "Performance",
+   "short_definition": "Time from sending a request to getting the response.",
+   "explanation": "Measured in milliseconds; look at percentiles, not the average.",
+   "project_example": "k6 http_req_duration.",
+   "launchpad_link": "/lp/performance",
+   "related_terms": "p95, p99"
+  },
+  {
+   "term": "p50",
+   "category": "Performance",
+   "short_definition": "Median latency: half the requests were faster than this.",
+   "explanation": "",
+   "project_example": "Shown for every Load Test Run.",
+   "launchpad_link": "/lp/performance",
+   "related_terms": "p95, Latency"
+  },
+  {
+   "term": "p95",
+   "category": "Performance",
+   "short_definition": "95th percentile latency: 95% of requests were faster than this.",
+   "explanation": "The usual service-level number: it shows what slow users feel, without being thrown by one outlier.",
+   "project_example": "The main chart on the Performance page; also the live-site guard's limit.",
+   "launchpad_link": "/lp/performance",
+   "related_terms": "p99, Latency, Threshold"
+  },
+  {
+   "term": "p99",
+   "category": "Performance",
+   "short_definition": "99th percentile latency: the slowest 1% start here.",
+   "explanation": "Sensitive to queueing, garbage collection and cold caches.",
+   "project_example": "Shown for every run.",
+   "launchpad_link": "/lp/performance",
+   "related_terms": "p95"
+  },
+  {
+   "term": "Throughput",
+   "category": "Performance",
+   "short_definition": "How much work is done per unit of time, usually requests per second (RPS).",
+   "explanation": "Throughput rises with load until a bottleneck; then latency rises instead.",
+   "project_example": "RPS on every Load Test Run.",
+   "launchpad_link": "/lp/performance",
+   "related_terms": "RPS, Bottleneck"
+  },
+  {
+   "term": "RPS",
+   "category": "Performance",
+   "short_definition": "Requests per second.",
+   "explanation": "",
+   "project_example": "k6 http_reqs rate.",
+   "launchpad_link": "/lp/performance",
+   "related_terms": "Throughput"
+  },
+  {
+   "term": "Error Rate",
+   "category": "Performance",
+   "short_definition": "Share of requests that failed (non-2xx/3xx or timeouts).",
+   "explanation": "Usually must stay under 1%.",
+   "project_example": "k6 http_req_failed; a profile threshold.",
+   "launchpad_link": "/lp/performance",
+   "related_terms": "Threshold, 429"
+  },
+  {
+   "term": "Bottleneck",
+   "category": "Performance",
+   "short_definition": "The one resource that limits throughput (CPU, DB, workers, network).",
+   "explanation": "Find it by watching what saturates first as load rises.",
+   "project_example": "Compare pod CPU with p95 during a run: if CPU sits at the limit, CPU is the bottleneck.",
+   "launchpad_link": "/lp/performance",
+   "related_terms": "Throughput, Throttling"
+  },
+  {
+   "term": "Capacity Planning",
+   "category": "Performance",
+   "short_definition": "Working out how many resources an app needs for expected load.",
+   "explanation": "Use load-test numbers: if 2 pods give 30 RPS at p95 < 800 ms, 60 RPS needs about 4.",
+   "project_example": "Compare runs on the Performance page.",
+   "launchpad_link": "/lp/performance",
+   "related_terms": "HPA, Load Test"
+  },
+  {
+   "term": "Live-Site Guard",
+   "category": "Performance",
+   "short_definition": "The Launchpad's safety check for the shared server.",
+   "explanation": "Every 5 s during a build or load test it times a request to the live site and reads the node load. Two breaches in a row stop the test or build.",
+   "project_example": "Settings > Live-site guard; probes are listed as Guard Events.",
+   "launchpad_link": "/lp/overview",
+   "related_terms": "Burstable Instance, p95"
+  },
+  {
+   "term": "Observability",
+   "category": "Performance",
+   "short_definition": "Being able to see what a system is doing from its outputs: metrics, logs and traces.",
+   "explanation": "",
+   "project_example": "Pod metrics, pod logs, Jenkins console and k6 results are all in the Launchpad.",
+   "launchpad_link": "/lp/performance",
+   "related_terms": "metrics-server"
+  }
+ ],
+ "articles": [
+  {
+   "title": "How a deploy works",
+   "category": "CI/CD",
+   "summary": "From a push (or the Build & Deploy button) to new pods taking traffic.",
+   "body": "1. **Trigger.** A push to `main` calls the GitHub **webhook**, or you click **Build & Deploy** on the Pipelines page. The Launchpad takes the heavy-operation lock and starts the Jenkins job with parameters.\n2. **Checkout and test.** Jenkins checks out the commit, runs ruff and the unit tests.\n3. **Build.** Kaniko builds the image from `deploy/docker/Containerfile` and pushes `ghcr.io/satya8848/taskflow:<sha>`.\n4. **Values.** Jenkins reads the environment's Helm values from the Launchpad (`pipelines.helm_values`), so what you set on the Environments page is what gets deployed.\n5. **Migrate.** A Helm pre-upgrade Job runs `bench migrate` against the site's database.\n6. **Roll out.** `helm upgrade` changes the image; each Deployment does a rolling update; readiness probes hold traffic until new pods answer.\n7. **Smoke test.** Jenkins calls `/api/method/ping` and the board API through the Service.\n8. **Report.** Jenkins posts the result and image tag to the Launchpad (`pipelines.report`), which records a Deployment Event.\n\nIf a stage fails, the old pods keep serving. Use **Roll back** on the Deployments page to return to an earlier image at any time.",
+   "related_terms": "Pipeline, Jenkins, Helm, Rolling Update, Rollback"
+  },
+  {
+   "title": "Reading a load-test result",
+   "category": "Load Testing",
+   "summary": "What p95, RPS and error rate tell you, and what to change.",
+   "body": "- **p95 latency** is the main number: 95% of requests were faster. Compare it with the profile threshold.\n- **RPS** (throughput) should grow with VUs. When VUs go up but RPS stays flat and p95 climbs, you have hit a **bottleneck**.\n- **Error rate** above 0 means failures: 429 means the proxy rate limit, 502/504 means pods were overloaded or restarting.\n- **Pod CPU** on the same chart: CPU flat at the limit means CPU throttling; raise the CPU limit or let the HPA add pods.\n- **HPA replicas**: did the autoscaler add pods, and how long did it take?\n\nChange one thing at a time (replicas, CPU limit, rate limit), run the same profile again and compare on the Performance page.",
+   "related_terms": "p95, RPS, Error Rate, Bottleneck, HPA"
+  },
+  {
+   "title": "Why this server needs a guard",
+   "category": "Performance",
+   "summary": "The live sites share the EC2 VM; this is how the demo stays out of their way.",
+   "body": "The EC2 instance is a **t2.large**: 2 vCPUs with a low baseline and CPU credits for bursts. It also serves the live sites.\n\n- **ResourceQuotas** cap all demo namespaces together below what the VM has.\n- **One heavy operation at a time**: a build, deploy or load test takes a lock; a second one waits.\n- **Load-test caps**: at most 50 VUs and 3 minutes.\n- **Live-site guard**: every 5 s, probe the live site and node load; two breaches in a row stop the test or build. Every probe is a Guard Event.\n\nTo run bigger tests, move the demo to its own instance and raise the caps in Settings.",
+   "related_terms": "Burstable Instance, Live-Site Guard, ResourceQuota"
+  }
+ ]
+}

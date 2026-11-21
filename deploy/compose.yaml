@@ -1,0 +1,81 @@
+# Copyright (c) 2026, Satya and contributors. For license information, please see license.txt
+# StackPilot on one server. Every service is memory-capped so the other sites on the
+# host keep their resources. Only 127.0.0.1 ports are published; host nginx does TLS.
+name: stackpilot
+
+x-app: &app
+  image: ${SP_IMAGE:-stackpilot:latest}
+  restart: unless-stopped
+  environment: &env
+    SITE_NAME: ${SITE_NAME:-hub.3-131-57-88.sslip.io}
+    DB_HOST: mariadb
+    REDIS_HOST: redis
+    MEILI_URL: http://meilisearch:7700
+    MEILI_KEY: ${MEILI_KEY}
+  volumes:
+    - site:/home/frappe/frappe-bench/sites/${SITE_NAME:-hub.3-131-57-88.sslip.io}
+  depends_on: [mariadb, redis]
+
+services:
+  mariadb:
+    image: mariadb:11.4
+    restart: unless-stopped
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci", "--skip-character-set-client-handshake",
+              "--innodb-buffer-pool-size=256M", "--max-connections=100", "--performance-schema=OFF"]
+    environment: { MARIADB_ROOT_PASSWORD: "${DB_ROOT_PASSWORD}" }
+    volumes: [db:/var/lib/mysql]
+    mem_limit: 512m
+    healthcheck: { test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"], interval: 10s, retries: 10 }
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["--maxmemory", "96mb", "--maxmemory-policy", "allkeys-lru", "--save", ""]
+    mem_limit: 128m
+  meilisearch:
+    image: getmeili/meilisearch:v1.11
+    restart: unless-stopped
+    environment: { MEILI_MASTER_KEY: "${MEILI_KEY}", MEILI_ENV: production, MEILI_NO_ANALYTICS: "true", MEILI_MAX_INDEXING_MEMORY: 128Mb }
+    volumes: [meili:/meili_data]
+    mem_limit: 300m
+
+  web:
+    <<: *app
+    command: ["web"]
+    environment: { <<: *env, GUNICORN_WORKERS: "3" }
+    ports: ["127.0.0.1:8090:8080", "127.0.0.1:9090:9000"]
+    mem_limit: 700m
+  nginx:
+    <<: *app
+    command: ["nginx"]
+    network_mode: "service:web"
+    depends_on: [web]
+    mem_limit: 48m
+  socketio:
+    <<: *app
+    command: ["socketio"]
+    network_mode: "service:web"
+    depends_on: [web]
+    mem_limit: 128m
+  worker:
+    <<: *app
+    command: ["worker"]
+    mem_limit: 500m
+  scheduler:
+    <<: *app
+    command: ["scheduler"]
+    mem_limit: 160m
+
+  # One-off: docker compose run --rm init   (creates the site, seeds content, builds the search index)
+  init:
+    <<: *app
+    command: ["new-site"]
+    restart: "no"
+    profiles: ["setup"]
+    environment: { <<: *env, DB_ROOT_PASSWORD: "${DB_ROOT_PASSWORD}", ADMIN_PASSWORD: "${ADMIN_PASSWORD}" }
+  migrate:
+    <<: *app
+    command: ["migrate"]
+    restart: "no"
+    profiles: ["setup"]
+
+volumes: { db: {}, meili: {}, site: {} }

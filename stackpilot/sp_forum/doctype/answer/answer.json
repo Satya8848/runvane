@@ -1,0 +1,106 @@
+{
+ "actions": [],
+ "creation": "2026-11-21 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "modified": "2026-11-21 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "SP Forum",
+ "name": "Answer",
+ "owner": "Administrator",
+ "field_order": [
+  "question",
+  "votes",
+  "is_accepted",
+  "is_ai",
+  "ai_provider",
+  "s1",
+  "body"
+ ],
+ "fields": [
+  {
+   "fieldname": "question",
+   "fieldtype": "Link",
+   "label": "Question",
+   "options": "Question",
+   "reqd": 1,
+   "in_list_view": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "votes",
+   "fieldtype": "Int",
+   "label": "Votes",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "is_accepted",
+   "fieldtype": "Check",
+   "label": "Is Accepted",
+   "read_only": 1
+  },
+  {
+   "fieldname": "is_ai",
+   "fieldtype": "Check",
+   "label": "AI Draft",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ai_provider",
+   "fieldtype": "Data",
+   "label": "Ai Provider",
+   "read_only": 1
+  },
+  {
+   "fieldname": "s1",
+   "fieldtype": "Section Break",
+   "label": ""
+  },
+  {
+   "fieldname": "body",
+   "fieldtype": "Markdown Editor",
+   "label": "Body",
+   "reqd": 1
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "SP Moderator",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1
+  },
+  {
+   "role": "SP Member",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "if_owner": 1
+  },
+  {
+   "role": "All",
+   "read": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "links": [],
+ "row_format": "Dynamic",
+ "description": "An answer to a forum question (human or AI draft).",
+ "autoname": "hash",
+ "track_changes": 1,
+ "naming_rule": "Random"
+}
