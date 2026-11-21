@@ -86,7 +86,10 @@ class TestAIGateway(IntegrationTestCase):
 		"""Without any key the gateway refuses clearly."""
 		settings = frappe.get_single("AI Settings")
 		settings.ai_enabled = 1
+		for provider in ("anthropic", "gemini", "groq", "openai"):
+			settings.set(f"{provider}_api_key", "")
 		settings.save()
+		frappe.clear_document_cache("AI Settings", "AI Settings")
 		frappe.set_user("Administrator")
 		with self.assertRaises(gateway.AIUnavailable):
 			gateway.run("chat", "system", [{"role": "user", "content": "hi"}])
@@ -103,4 +106,7 @@ class TestAIGateway(IntegrationTestCase):
 		frappe.clear_document_cache("AI Settings", "AI Settings")
 		with self.assertRaises(gateway.AIUnavailable):
 			gateway.run("chat", "system", [{"role": "user", "content": "hi"}], user="Administrator")
-		frappe.db.set_single_value("AI Settings", {"byok_only": 0, "monthly_budget_usd": 25, "month_spend_usd": 0})
+		settings = frappe.get_single("AI Settings")
+		settings.update({"byok_only": 0, "monthly_budget_usd": 25, "month_spend_usd": 0, "anthropic_api_key": ""})
+		settings.save()
+		frappe.clear_document_cache("AI Settings", "AI Settings")
