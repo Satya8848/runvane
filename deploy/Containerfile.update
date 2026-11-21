@@ -1,0 +1,16 @@
+# Copyright (c) 2026, Satya and contributors
+# For license information, please see license.txt
+#
+# Fast update on the server: start from the running image and replace only the app
+# (code, built UI and assets). Usage on the server:
+#   docker tag stackpilot:latest stackpilot:prev
+#   docker build -f deploy/Containerfile.update -t stackpilot:latest .
+ARG RUNNING_IMAGE=stackpilot:prev
+FROM ${RUNNING_IMAGE}
+USER root
+RUN rm -rf /home/frappe/frappe-bench/apps/stackpilot
+USER frappe
+COPY --chown=frappe:frappe . /home/frappe/frappe-bench/apps/stackpilot
+RUN cd apps/stackpilot/frontend && yarn install --frozen-lockfile --silent && yarn build && rm -rf node_modules \
+ && cd /home/frappe/frappe-bench && bench build --app stackpilot --production && rm -rf /home/frappe/.cache
+COPY --chown=frappe:frappe deploy/entrypoint.sh /usr/local/bin/sp-entrypoint
