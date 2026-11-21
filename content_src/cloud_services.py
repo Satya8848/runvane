@@ -175,7 +175,7 @@ def card(service):
 		str: Markdown.
 	"""
 	name, category, plain, use, avoid, equivalents, command, tip = service
-	lines = [f"### {name}", f"*{category}*", "", f"**In plain words:** {plain}", "",
+	lines = [f"### {name}", "", f"**In plain words:** {plain}", "",
 		"| | |", "| --- | --- |", f"| ✅ Use it for | {use} |"]
 	if avoid and avoid != "-":
 		lines.append(f"| ⛔ Not for | {avoid} |")
@@ -200,7 +200,7 @@ def guide(slug, title, intro, services):
 	for s in services:
 		if s[1] not in order:
 			order.append(s[1])
-	body = ["**Jump to:** " + " · ".join(order), ""]
+	body = []
 	for category in order:
 		body.append(f"## {category}\n")
 		body += [card(s) for s in services if s[1] == category]

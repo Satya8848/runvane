@@ -22,6 +22,10 @@
 @media (prefers-color-scheme: dark) { .codewrap { border-color: #2b3346; background: #141927; } .codebar { background: #1f2638; } }
 .hljs-keyword, .hljs-selector-tag { color: #8fb2ff; } .hljs-string, .hljs-attr { color: #5eead4; } .hljs-comment { color: #7a879e; font-style: italic; }
 .hljs-number, .hljs-literal { color: #fbbf24; } .hljs-title, .hljs-section { color: #f0abfc; } .hljs-variable, .hljs-template-variable { color: #fca5a5; }
+.card > .prose-sp > :first-child, .card > .prose-sp > h3:first-child { margin-top: 0; }
+.tabfade { position: relative; }
+.tabfade::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; width: 40px; pointer-events: none; background: linear-gradient(to right, transparent, #fff); }
+@media (prefers-color-scheme: dark) { .tabfade::after { background: linear-gradient(to right, transparent, #0a0d15); } }
 mark { background: rgba(58, 99, 245, .18); color: inherit; border-radius: 3px; padding: 0 1px; }
 .mermaid-box svg { max-width: 100%; height: auto; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
