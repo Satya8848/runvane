@@ -179,7 +179,7 @@ def card(service):
 		"| | |", "| --- | --- |", f"| ✅ Use it for | {use} |"]
 	if avoid and avoid != "-":
 		lines.append(f"| ⛔ Not for | {avoid} |")
-	lines += [f"| 🔁 Same idea on other clouds | {equivalents} |", "", "```bash", command, "```", f"> 💡 **Best practice:** {tip}", ""]
+	lines += [f"| 🔁 Same idea on other clouds | {equivalents} |", "", "```bash", command, "```", f"💡 **Best practice:** {tip}", ""]
 	return "\n".join(lines)
 
 
@@ -200,7 +200,7 @@ def guide(slug, title, intro, services):
 	for s in services:
 		if s[1] not in order:
 			order.append(s[1])
-	body = [f"> **In plain words:** {intro}", "", "**Jump to:** " + " · ".join(order), ""]
+	body = ["**Jump to:** " + " · ".join(order), ""]
 	for category in order:
 		body.append(f"## {category}\n")
 		body += [card(s) for s in services if s[1] == category]
@@ -248,7 +248,7 @@ def comparison():
 		("Data warehouse", "Redshift / Athena", "Synapse / Fabric", "BigQuery"),
 		("Cost tools", "Cost Explorer / Budgets", "Cost Management", "Billing reports / Budgets"),
 	]
-	body = ["> **In plain words:** every big cloud has the same building blocks with different names. Find the job you need on the left, then read across.", "",
+	body = ["Find the job you need on the left, then read across.", "",
 		"| I need… | AWS | Azure | Google Cloud |", "| --- | --- | --- | --- |"]
 	body += [f"| **{a}** | {b} | {c} | {d} |" for a, b, c, d in rows]
 	body += ["", "## How to choose a cloud", "",
@@ -259,7 +259,7 @@ def comparison():
 		"| Small team, simple apps, predictable bill | **DigitalOcean / Hetzner** | Simple pricing, fewer moving parts |",
 		"| Learning or free labs | **Oracle Cloud free tier / AWS & GCP free tiers** | Free compute to practise on |",
 		"", "## Other clouds and edge", ""] + [card(s) for s in OTHERS]
-	body += ["> 💡 **Best practice:** pick one main cloud, learn its identity and networking deeply, and use Terraform so your skills transfer."]
+	body += ["💡 **Best practice:** pick one main cloud, learn its identity and networking deeply, and use Terraform so your skills transfer."]
 	return {"slug": "cloud-comparison", "title": "Which cloud service should I use?", "category": "Cloud services explained",
 		"intro": "Every big cloud has the same building blocks with different names. This map shows the equivalent service on AWS, Azure and Google Cloud for each job.",
 		"body": "\n".join(body), "diagram": ""}
